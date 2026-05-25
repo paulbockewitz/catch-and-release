@@ -3,6 +3,9 @@
 credentials.json
 token.json
 
+# Claude Code local files
+.claude/
+
 # Temporary working files
 .tmp/
 
