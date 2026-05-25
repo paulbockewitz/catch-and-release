@@ -1,20 +1,11 @@
 # Catch and Release
 
-A personal automation toolkit built on the **WAT framework** (Workflows, Agents, Tools) — a pattern for building reliable AI-assisted workflows by separating probabilistic reasoning from deterministic execution.
+A workflow for people learning a new language.  Frequently new words and phrases are discovered and forgotten.  This can create frustration and hinder learning.  Catch and release sets up the learner for success by using Google Sheets and the ankiweb printing press CLI to:
 
-## How it works
+1) provide a central spot to translate and CATCH your new learnings.  Use Google Sheets' ability to call translation in the moment and persist those (unlike most translation tools)
 
-```
-Workflows  →  Markdown SOPs that define what to do and how
-   Agent   →  Claude reads the workflow and coordinates execution  
-   Tools   →  Python scripts that do the actual work
-```
+2) automatically RELEASE those newly discovered words and phrases into the Anki system.  This gets the learner on a track to leverage Anki's concept of spaced repitition and their algotythm to practice new vocabulary/phrases right before you forget it again.
 
-The key insight: when AI tries to handle every step directly, accuracy compounds downward fast. By offloading execution to deterministic Python scripts, the agent stays focused on orchestration and decision-making.
-
----
-
-## Workflows
 
 ### 📚 Vocabulary → Anki Flashcards
 [`workflows/sync_vocab_to_anki.md`](workflows/sync_vocab_to_anki.md)
@@ -96,21 +87,3 @@ requirements.txt        Python dependencies
 
 ---
 
-## Adding a new workflow
-
-1. Copy `workflows/_TEMPLATE.md` and fill in the sections
-2. Write a Python tool in `tools/` that does the execution
-3. Add any new credentials to `.env.example` (with instructions)
-4. Run it: `python tools/<your_tool>.py --dry-run`
-
----
-
-## Philosophy
-
-Each workflow in this repo follows the same pattern:
-
-- **The workflow doc** explains the objective, required inputs, steps, and edge cases — it's the briefing
-- **The tool** handles the execution deterministically — API calls, file operations, data transforms
-- **The agent** (Claude) reads the workflow, runs the tools in order, and handles failures
-
-Local files in `.tmp/` are disposable scratch space. Final outputs go somewhere permanent (Anki, Google Sheets, etc.).
