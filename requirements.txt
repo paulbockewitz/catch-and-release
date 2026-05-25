@@ -1,0 +1,20 @@
+# Core utilities used across most tools
+python-dotenv>=1.0.0          # Load .env automatically in every script
+
+# Google APIs
+google-auth>=2.0.0
+google-auth-oauthlib>=1.0.0
+google-auth-httplib2>=0.1.0
+google-api-python-client>=2.0.0
+
+# Data handling
+pandas>=2.0.0
+openpyxl>=3.1.0               # Excel read/write for pandas
+
+# HTTP / scraping (add as needed)
+requests>=2.31.0
+# playwright>=1.40.0           # Uncomment when a workflow needs browser automation
+# beautifulsoup4>=4.12.0       # Uncomment for HTML parsing
+
+# CLI helpers
+argparse                       # stdlib — listed for explicitness
