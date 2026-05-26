@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(& \"C:\\\\Users\\\\paulb\\\\printing-press\\\\library\\\\ankiweb\\\\ankiweb-pp-cli.exe\" doctor)"
+    ]
+  }
+}
