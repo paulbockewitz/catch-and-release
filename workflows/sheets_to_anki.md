@@ -1,5 +1,11 @@
 # Workflow: Google Sheet → Anki Cards
 
+> **First time?** Run the setup wizard instead of following this guide manually:
+> ```
+> python tools/setup.py
+> ```
+> It handles every step below automatically and writes your `.env` for you.
+
 ## Objective
 Read rows from a Google Sheet and create `Basic (and reversed card)` Anki flashcards via the AnkiWeb CLI. After each card is created, write a checkmark (`✓`) to column D on that row. Re-runs skip already-checked rows (idempotent).
 

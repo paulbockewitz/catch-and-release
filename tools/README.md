@@ -18,4 +18,5 @@ Python scripts that handle deterministic execution — API calls, data transform
 
 | Script | Purpose |
 |--------|---------|
-| *(add entries as scripts are created)* | |
+| `setup.py` | **Start here.** Onboarding wizard — installs deps, sets up Google credentials, creates a vocabulary sheet, configures AnkiWeb, and writes `.env`. Safe to re-run. |
+| `sheets_to_anki.py` | Reads vocabulary rows from a Google Sheet and creates Anki flashcards via the CLI. Writes ✓ to the done column after each success. |
