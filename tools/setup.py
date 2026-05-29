@@ -469,7 +469,7 @@ def step4_create_sheet(service) -> tuple:
     # Pre-populate rows 2–51 so users can just type in column A without touching formulas.
     data_rows = []
     for row_num in range(2, 52):
-        formula = f'=IF(A{row_num}<>"",GOOGLETRANSLATE(A{row_num},"{target_code}","{native_code}"),")")'
+        formula = f'=IF(A{row_num}<>"",GOOGLETRANSLATE(A{row_num},"{target_code}","{native_code}"),"")'
         data_rows.append(["", formula, "", ""])
 
     # Overwrite first two data rows with example entries
