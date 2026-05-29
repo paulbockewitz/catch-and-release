@@ -40,6 +40,97 @@ DEFAULT_ANKIWEB_CLI = str(
     Path.home() / "printing-press" / "library" / "ankiweb" / "ankiweb-pp-cli.exe"
 )
 
+# Full list of Google-supported language codes (used for GOOGLETRANSLATE formula)
+# Source: https://developers.google.com/workspace/admin/directory/v1/languages
+SUPPORTED_LANGUAGES = {
+    "af": "Afrikaans", "sq": "Albanian", "am": "Amharic", "ar": "Arabic",
+    "hy": "Armenian", "as": "Assamese", "az": "Azerbaijani", "eu": "Basque",
+    "bn": "Bengali", "bg": "Bulgarian", "my": "Burmese", "ca": "Catalan",
+    "chr": "Cherokee", "zh-HK": "Chinese (Hong Kong)", "zh-CN": "Chinese (Simplified)",
+    "zh-TW": "Chinese (Traditional)", "hr": "Croatian", "cs": "Czech",
+    "da": "Danish", "nl": "Dutch", "en-GB": "English (UK)", "en": "English (US)",
+    "et": "Estonian", "fil": "Filipino", "fi": "Finnish", "fr": "French",
+    "fr-CA": "French (Canada)", "gl": "Galician", "ka": "Georgian", "de": "German",
+    "el": "Greek", "gu": "Gujarati", "iw": "Hebrew", "hi": "Hindi",
+    "hu": "Hungarian", "is": "Icelandic", "id": "Indonesian", "ga": "Irish",
+    "it": "Italian", "ja": "Japanese", "kn": "Kannada", "kk": "Kazakh",
+    "km": "Khmer", "ko": "Korean", "lo": "Lao", "lv": "Latvian",
+    "lt": "Lithuanian", "mk": "Macedonian", "ms": "Malay", "ml": "Malayalam",
+    "mr": "Marathi", "mn": "Mongolian", "ne": "Nepali", "no": "Norwegian",
+    "or": "Oriya", "fa": "Persian", "pl": "Polish", "pt-BR": "Portuguese (Brazil)",
+    "pt-PT": "Portuguese (Portugal)", "pa": "Punjabi", "ro": "Romanian",
+    "ru": "Russian", "sr": "Serbian", "si": "Sinhala", "sk": "Slovak",
+    "sl": "Slovenian", "es": "Spanish", "es-419": "Spanish (Latin America)",
+    "sw": "Swahili", "sv": "Swedish", "ta": "Tamil", "te": "Telugu",
+    "th": "Thai", "tr": "Turkish", "uk": "Ukrainian", "ur": "Urdu",
+    "uz": "Uzbek", "vi": "Vietnamese", "cy": "Welsh", "zu": "Zulu",
+}
+
+# Languages shown first in the picker (most common for language learners)
+COMMON_LANG_CODES = [
+    "es", "fr", "de", "it", "pt-BR", "ja", "ko", "zh-CN",
+    "ru", "ar", "hi", "tr", "nl", "sv", "pl", "vi",
+]
+
+
+def select_language(prompt_text: str, default_code: str = None) -> tuple:
+    """
+    Interactive language picker. Shows common languages by number, also
+    accepts a language code (e.g. "es") or partial name search (e.g. "span").
+    Returns (code, name).
+    """
+    common = [(c, SUPPORTED_LANGUAGES[c]) for c in COMMON_LANG_CODES if c in SUPPORTED_LANGUAGES]
+
+    print(f"\n  {prompt_text}\n")
+    for i, (code, name) in enumerate(common, 1):
+        print(f"    {i:2}. {name:<30} ({code})")
+
+    default_label = None
+    if default_code and default_code in SUPPORTED_LANGUAGES:
+        default_label = f"{SUPPORTED_LANGUAGES[default_code]} ({default_code})"
+
+    print(f"\n  Enter a number, a code (e.g. 'es'), or part of a name (e.g. 'span' → Spanish)")
+
+    while True:
+        val = prompt("Your choice", default=default_label).strip()
+
+        # Number from the common list
+        try:
+            idx = int(val) - 1
+            if 0 <= idx < len(common):
+                code, name = common[idx]
+                ok(f"Selected: {name} ({code})")
+                return code, name
+            else:
+                print(f"  Please enter a number between 1 and {len(common)}")
+                continue
+        except ValueError:
+            pass
+
+        # Exact code match (case-insensitive)
+        lower = val.lower()
+        exact = [(c, n) for c, n in SUPPORTED_LANGUAGES.items() if c.lower() == lower]
+        if exact:
+            code, name = exact[0]
+            ok(f"Selected: {name} ({code})")
+            return code, name
+
+        # Partial name search
+        matches = [(c, n) for c, n in SUPPORTED_LANGUAGES.items() if lower in n.lower()]
+        if len(matches) == 1:
+            code, name = matches[0]
+            ok(f"Selected: {name} ({code})")
+            return code, name
+        elif len(matches) > 1:
+            print(f"\n  Multiple matches for '{val}':")
+            for c, n in matches[:8]:
+                print(f"    {n} ({c})")
+            if len(matches) > 8:
+                print(f"    … and {len(matches) - 8} more. Try a more specific term.")
+            continue
+
+        print(f"  Not found: '{val}'. Try a number, a code like 'es', or a name like 'Spanish'.")
+
 
 # ---------------------------------------------------------------------------
 # Terminal helpers
@@ -323,57 +414,94 @@ def step3_google_auth(creds_path: Path):
 # Step 4: Create Google Sheet
 # ---------------------------------------------------------------------------
 
-def step4_create_sheet(service) -> str:
-    header(4, "Google Sheet setup")
+def step4_create_sheet(service) -> tuple:
+    """Returns (sheet_id, target_lang_code, native_lang_code)."""
+    header(4, "Google Sheet setup + language selection")
 
     env = read_env()
-    existing_id = env.get("GOOGLE_SHEET_ID", "").strip()
+    existing_id     = env.get("GOOGLE_SHEET_ID", "").strip()
+    existing_target = env.get("ANKI_TARGET_LANG", "").strip()
+    existing_native = env.get("ANKI_NATIVE_LANG", "en").strip()
 
     if existing_id:
-        # Verify it's readable
         try:
             service.spreadsheets().get(spreadsheetId=existing_id).execute()
             skipped(f"Sheet already configured (ID: {existing_id[:20]}…)")
-            return existing_id
+            return existing_id, existing_target or "es", existing_native or "en"
         except Exception:
             warn("GOOGLE_SHEET_ID is set but the sheet isn't accessible — creating a new one")
 
-    sheet_title = prompt("What would you like to name your vocabulary sheet?", default="Anki Vocabulary")
-    tab_name    = prompt("Tab name for your vocabulary list?", default="Translate")
+    # Language selection
+    print("\n  First, tell us about the language you're learning.")
+    print("  This sets up auto-translation in your sheet using Google Translate.")
+
+    target_code, target_name = select_language(
+        "What language are you learning?",
+        default_code=existing_target or None,
+    )
+    native_code, native_name = select_language(
+        "What is your native language? (translations will appear in this language)",
+        default_code=existing_native or "en",
+    )
+
+    sheet_title = prompt(
+        "What would you like to name your vocabulary sheet?",
+        default=f"{target_name} Vocabulary",
+    )
+    tab_name = prompt("Tab name for your vocabulary list?", default="Translate")
 
     info(f"Creating Google Sheet: \"{sheet_title}\"...")
 
-    # Create the spreadsheet
     spreadsheet = service.spreadsheets().create(body={
         "properties": {"title": sheet_title},
         "sheets": [{"properties": {"title": tab_name}}],
     }).execute()
 
-    sheet_id    = spreadsheet["spreadsheetId"]
-    gid         = spreadsheet["sheets"][0]["properties"]["sheetId"]
-    sheet_url   = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
+    sheet_id = spreadsheet["spreadsheetId"]
+    gid      = spreadsheet["sheets"][0]["properties"]["sheetId"]
+    sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
 
-    # Populate headers + sample rows
+    # Header row uses language names as column labels
+    header_row = [target_name, native_name, "", "Done"]
+
+    # Sample rows with GOOGLETRANSLATE formula pre-filled in column B.
+    # Formula: =GOOGLETRANSLATE(A2, "es", "en") — auto-translates whatever is in column A.
+    # Pre-populate rows 2–51 so users can just type in column A without touching formulas.
+    data_rows = []
+    for row_num in range(2, 52):
+        formula = f'=IF(A{row_num}<>"",GOOGLETRANSLATE(A{row_num},"{target_code}","{native_code}"),")")'
+        data_rows.append(["", formula, "", ""])
+
+    # Overwrite first two data rows with example entries
+    example_word = {"es": "hola", "fr": "bonjour", "de": "hallo", "it": "ciao",
+                    "ja": "こんにちは", "ko": "안녕하세요", "pt-BR": "olá"}.get(target_code, "hello")
+    data_rows[0][0] = example_word
+    data_rows[1][0] = ""  # leave row 3 blank as a visual separator
+
     service.spreadsheets().values().update(
         spreadsheetId=sheet_id,
-        range=f"'{tab_name}'!A1:D3",
+        range=f"'{tab_name}'!A1:D{1 + len(data_rows)}",
         valueInputOption="USER_ENTERED",
-        body={"values": [
-            ["Front", "Back", "", "Done"],
-            ["hola", "hello", "", ""],
-            ["gracias", "thank you", "", ""],
-        ]},
+        body={"values": [header_row] + data_rows},
     ).execute()
 
-    # Format: bold header row + column widths
+    # Formatting: bold header, freeze row 1, column widths
     service.spreadsheets().batchUpdate(
         spreadsheetId=sheet_id,
         body={"requests": [
-            # Bold row 1
+            # Bold header row
             {"repeatCell": {
                 "range": {"sheetId": gid, "startRowIndex": 0, "endRowIndex": 1},
                 "cell": {"userEnteredFormat": {"textFormat": {"bold": True}}},
                 "fields": "userEnteredFormat.textFormat.bold",
+            }},
+            # Freeze row 1
+            {"updateSheetProperties": {
+                "properties": {
+                    "sheetId": gid,
+                    "gridProperties": {"frozenRowCount": 1},
+                },
+                "fields": "gridProperties.frozenRowCount",
             }},
             # Column A width: 250
             {"updateDimensionProperties": {
@@ -397,13 +525,14 @@ def step4_create_sheet(service) -> str:
     ).execute()
 
     ok(f"Sheet created: {sheet_title}")
+    ok(f"Column A: {target_name}  →  Column B: auto-translated to {native_name} via GOOGLETRANSLATE")
+    ok(f"Rows 2–51 pre-loaded with translation formulas — just type in column A")
     ok(f"URL: {sheet_url}")
     open_browser(sheet_url, sheet_title)
 
-    # Save tab name to .env now (sheet_id saved in step 9 with everything else)
     write_env_keys({"GOOGLE_SHEET_TAB": tab_name})
 
-    return sheet_id
+    return sheet_id, target_code, native_code
 
 
 # ---------------------------------------------------------------------------
@@ -614,7 +743,8 @@ def step8_verify_notetype(ankiweb_bin: str, cookie: str):
 # Step 9: Write .env
 # ---------------------------------------------------------------------------
 
-def step9_write_env(sheet_id: str, deck: str, cookie: str, ankiweb_bin: str):
+def step9_write_env(sheet_id: str, deck: str, cookie: str, ankiweb_bin: str,
+                    target_lang: str, native_lang: str):
     header(9, "Saving configuration to .env")
 
     env = read_env()
@@ -624,6 +754,8 @@ def step9_write_env(sheet_id: str, deck: str, cookie: str, ankiweb_bin: str):
         "GOOGLE_SHEET_ID":  sheet_id,
         "ANKI_DECK":        deck,
         "ANKIWEB_CLI_PATH": ankiweb_bin,
+        "ANKI_TARGET_LANG": target_lang,
+        "ANKI_NATIVE_LANG": native_lang,
     }
 
     # Set sensible defaults for anything not already configured
@@ -782,8 +914,8 @@ def main():
     # Step 3: Google auth
     service = step3_google_auth(creds_path)
 
-    # Step 4: Google Sheet
-    sheet_id = step4_create_sheet(service)
+    # Step 4: Google Sheet + language selection
+    sheet_id, target_lang, native_lang = step4_create_sheet(service)
 
     # Step 5: AnkiWeb account
     step5_ankiweb_account()
@@ -798,7 +930,7 @@ def main():
     step8_verify_notetype(ankiweb_bin, cookie)
 
     # Step 9: Write .env
-    step9_write_env(sheet_id, deck, cookie, ankiweb_bin)
+    step9_write_env(sheet_id, deck, cookie, ankiweb_bin, target_lang, native_lang)
 
     # Step 10: Dry run
     step10_dry_run()
