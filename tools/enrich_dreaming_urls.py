@@ -102,14 +102,20 @@ def read_sheet(service, sheet_id: str, tab: str) -> list:
         sys.exit(1)
 
 
-def write_cell(service, sheet_id: str, tab: str, sheet_row: int, col: str, value: str):
-    cell_range = f"'{tab}'!{col}{sheet_row}"
-    service.spreadsheets().values().update(
+def stage_write(pending: list, tab: str, sheet_row: int, col: str, value: str):
+    """Queue a cell write for later batch flush."""
+    pending.append({"range": f"'{tab}'!{col}{sheet_row}", "values": [[value]]})
+
+
+def flush_writes(service, sheet_id: str, pending: list):
+    """Send all queued writes in one batchUpdate call."""
+    if not pending:
+        return
+    service.spreadsheets().values().batchUpdate(
         spreadsheetId=sheet_id,
-        range=cell_range,
-        valueInputOption="USER_ENTERED",
-        body={"values": [[value]]},
+        body={"valueInputOption": "USER_ENTERED", "data": pending},
     ).execute()
+    pending.clear()
 
 
 def run_cmd(cmd: list) -> tuple:
@@ -236,6 +242,7 @@ def main():
     skipped    = 0
     errors     = 0
     log_lines  = []
+    pending    = []  # deferred writes — flushed in one batchUpdate at the end
 
     for i, row in enumerate(data_rows, start=header_row):
         sheet_row_num = i + 1
@@ -279,17 +286,22 @@ def main():
                 print(f"  WOULD WRITE  row {sheet_row_num}: {display}  @ {hit_ts}")
             else:
                 if not current_url:
-                    write_cell(service, sheet_id, tab, sheet_row_num, url_col, cell_value)
+                    stage_write(pending, tab, sheet_row_num, url_col, cell_value)
                 if hit_ts:
-                    write_cell(service, sheet_id, tab, sheet_row_num, ts_col, hit_ts)
-                print(f"  WROTE  row {sheet_row_num}: {cell_value}  @ {hit_ts}")
+                    stage_write(pending, tab, sheet_row_num, ts_col, hit_ts)
+                print(f"  QUEUED row {sheet_row_num}: {display}  @ {hit_ts}")
         else:
             no_matches += 1
             if args.dry_run:
                 print(f"  WOULD WRITE  row {sheet_row_num}: {NO_MATCHES}")
             else:
-                write_cell(service, sheet_id, tab, sheet_row_num, url_col, NO_MATCHES)
-                print(f"  WROTE  row {sheet_row_num}: {NO_MATCHES}  ({spanish})")
+                stage_write(pending, tab, sheet_row_num, url_col, NO_MATCHES)
+                print(f"  QUEUED row {sheet_row_num}: {NO_MATCHES}  ({spanish})")
+
+    if pending:
+        print(f"\nFlushing {len(pending)} writes to Google Sheets...")
+        flush_writes(service, sheet_id, pending)
+        print("  Done.")
 
     print()
     print("=" * 60)
