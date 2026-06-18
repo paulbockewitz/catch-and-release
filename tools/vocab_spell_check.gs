@@ -106,10 +106,14 @@ function handleEdit(e) {
   // Grammar, style, and punctuation are excluded; the PUNCTUATION and
   // TYPOGRAPHY categories are also disabled at the API level.
   var spellingMatches = (result.matches || []).filter(function(m) {
-    return m.rule &&
-           (m.rule.issueType === 'misspelling' || m.rule.issueType === 'typographical') &&
-           m.replacements &&
-           m.replacements.length > 0;
+    if (!m.rule) return false;
+    if (m.rule.issueType !== 'misspelling' && m.rule.issueType !== 'typographical') return false;
+    if (!m.replacements || m.replacements.length === 0) return false;
+    // Skip corrections that shorten the matched span — accent fixes are always the same
+    // length, and shrinking corrections (e.g. "lucido" → "lucid") are usually English
+    // misidentifying a Spanish word by dropping its final vowel.
+    if (m.replacements[0].value.length < m.length) return false;
+    return true;
   });
 
   if (spellingMatches.length === 0) return;
