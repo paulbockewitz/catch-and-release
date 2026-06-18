@@ -272,10 +272,11 @@ def main():
             continue
 
         if url:
-            cell_value = f"{url} ({count} matches)"
+            display = f"{url} ({count} matches)"
+            cell_value = f'=HYPERLINK("{url}","{display}")'
             enriched += 1
             if args.dry_run:
-                print(f"  WOULD WRITE  row {sheet_row_num}: {cell_value}  @ {hit_ts}")
+                print(f"  WOULD WRITE  row {sheet_row_num}: {display}  @ {hit_ts}")
             else:
                 if not current_url:
                     write_cell(service, sheet_id, tab, sheet_row_num, url_col, cell_value)
