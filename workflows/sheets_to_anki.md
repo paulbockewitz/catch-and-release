@@ -38,9 +38,11 @@ If you have an existing `token.json` from a readonly scope, delete it before run
 ### 2. Find your Anki deck name
 ```powershell
 $env:ANKIWEB_COOKIES="ankiweb=<your-cookie>"
-ankiweb-pp-cli decks list --json
+ankiweb-pp-cli notetypes --json
 ```
-Copy the `name` value of your target deck into `ANKI_DECK` in `.env`.
+The response includes both `note_types` and `decks` arrays. Copy the `name` value of your target deck into `ANKI_DECK` in `.env`.
+
+> **Note:** `ankiweb-pp-cli decks list` may return HTTP 404 on newer CLI builds — the `notetypes` command above is the reliable alternative. The setup wizard handles this automatically.
 
 ### 3. Confirm the note type name
 ```powershell
@@ -154,4 +156,5 @@ Summary: 2 added, 1 skipped, 1 error(s)
 | `token.json` scope error | Delete `token.json` and re-run to re-authorize with read+write scope |
 | AnkiWeb auth error (401/403) | Refresh `ANKIWEB_COOKIES` in `.env` (see Cookie section above) |
 | Card created but checkmark missing | Run again — the script will try to add the card again; AnkiWeb CLI will handle the duplicate gracefully, then the checkmark will be written |
-| Wrong deck | Run `ankiweb-pp-cli decks list` to confirm the deck name, update `ANKI_DECK` in `.env` |
+| `decks list` returns HTTP 404 | AnkiWeb renamed this endpoint. Use `ankiweb-pp-cli notetypes --json` instead — the response includes a `decks` array. The setup wizard falls back automatically. |
+| Wrong deck | Run `ankiweb-pp-cli notetypes --json` and look for the `decks` array, update `ANKI_DECK` in `.env` |

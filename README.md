@@ -2,7 +2,7 @@
 
 WAT framework workflows for language learning automation.
 
-Reads vocabulary rows from a Google Sheet and creates Anki flashcards automatically.
+Reads vocabulary/phrases rows from a Google Sheet and creates Anki flashcards automatically.
 Marks each row ✓ when done — re-runs are always safe.
 
 ---
@@ -24,8 +24,8 @@ python tools/sheets_to_anki.py             # create the cards
 
 ## How it works
 
-1. You keep vocabulary in a Google Sheet (front in column A, translation in column B)
-2. Run `sheets_to_anki.py` — it creates a `Basic (and reversed card)` note in Anki for each unchecked row
+1. You keep vocabulary or phrases in a Google Sheet (front in column A, translation in column B)
+2. Run `sheets_to_anki.py` — it creates a `Basic (and reversed card)` note in Anki for each unchecked row (run it as an automated/scheduled workflow)
 3. A ✓ is written to column D so the row is skipped on future runs
 
 ---

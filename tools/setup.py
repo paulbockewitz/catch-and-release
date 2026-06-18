@@ -465,11 +465,19 @@ def step4_create_sheet(service) -> tuple:
     header_row = [target_name, native_name, "", "Done"]
 
     # Sample rows with GOOGLETRANSLATE formula pre-filled in column B.
-    # Formula: =GOOGLETRANSLATE(A2, "es", "en") — auto-translates whatever is in column A.
+    # Column B: detect input language, translate to the other language.
+    # English input → target language; target language input → English.
     # Pre-populate rows 2–51 so users can just type in column A without touching formulas.
     data_rows = []
+    # DETECTLANGUAGE returns base codes (e.g. "pt") not subtags ("pt-BR").
+    # Use only the base part for the comparison so regional codes still match.
+    native_base = native_code.split("-")[0]
     for row_num in range(2, 52):
-        formula = f'=IF(A{row_num}<>"",GOOGLETRANSLATE(A{row_num},"{target_code}","{native_code}"),"")'
+        formula = (
+            f'=IF(A{row_num}="","",IF(DETECTLANGUAGE(A{row_num})="{native_base}",'
+            f'GOOGLETRANSLATE(A{row_num},"{native_code}","{target_code}"),'
+            f'GOOGLETRANSLATE(A{row_num},"{target_code}","{native_code}")))'
+        )
         data_rows.append(["", formula, "", ""])
 
     # Overwrite first two data rows with example entries
@@ -525,7 +533,7 @@ def step4_create_sheet(service) -> tuple:
     ).execute()
 
     ok(f"Sheet created: {sheet_title}")
-    ok(f"Column A: {target_name}  →  Column B: auto-translated to {native_name} via GOOGLETRANSLATE")
+    ok(f"Column B: auto-translates between {target_name} and {native_name} via DETECTLANGUAGE + GOOGLETRANSLATE")
     ok(f"Rows 2–51 pre-loaded with translation formulas — just type in column A")
     ok(f"URL: {sheet_url}")
     open_browser(sheet_url, sheet_title)
@@ -636,11 +644,33 @@ def step7_ankiweb_deck(ankiweb_bin: str, cookie: str) -> str:
         skipped(f"Deck already configured: \"{existing_deck}\"")
         return existing_deck
 
+    fallback_tried = False
     for attempt in range(1, 4):
         code, stdout, stderr = run_cmd(
             [ankiweb_bin, "decks", "list", "--json", "--no-color", "--no-input"],
             extra_env={"ANKIWEB_COOKIES": cookie},
         )
+
+        # Fallback: AnkiWeb renamed the decks endpoint; notetypes returns decks too.
+        # Only attempt once — the endpoint won't recover on later retries.
+        if code != 0 and not fallback_tried:
+            fallback_tried = True
+            fb_code, fb_stdout, fb_stderr = run_cmd(
+                [ankiweb_bin, "notetypes", "--json", "--no-color", "--no-input"],
+                extra_env={"ANKIWEB_COOKIES": cookie},
+            )
+            if fb_code == 0:
+                try:
+                    fb_data = json.loads(fb_stdout)
+                    if isinstance(fb_data, dict) and "decks" in fb_data:
+                        stdout = json.dumps(fb_data["decks"])  # re-serialize for downstream json.loads
+                        code = 0
+                    else:
+                        warn("notetypes fallback returned no 'decks' key — API shape may have changed")
+                except ValueError:
+                    warn("notetypes fallback returned invalid JSON")
+            else:
+                warn(f"notetypes fallback also failed: {fb_stderr or fb_stdout[:80]}")
 
         if code != 0:
             err(f"Could not fetch deck list: {stderr or stdout}")
@@ -652,7 +682,7 @@ def step7_ankiweb_deck(ankiweb_bin: str, cookie: str) -> str:
 
         try:
             decks = json.loads(stdout)
-        except (json.JSONDecodeError, ValueError):
+        except ValueError:
             decks = []
 
         # Clean up deck names — strip leading non-printable characters from protobuf encoding
