@@ -93,6 +93,30 @@ python tools/sheets_to_anki.py --sheet-id <other-id> --deck "Other Deck"
 
 ---
 
+## Dreaming URL Enrichment
+
+After creating Anki cards, optionally enrich each Spanish word with a Dreaming.com video URL:
+
+```powershell
+python tools/enrich_dreaming_urls.py
+```
+
+For each row with a Spanish word and an empty URL column (default: column E), this queries
+`dreaming-pp-cli concordance <word>` and writes the first matching video URL + hit count.
+Words with no concordance hits receive `no matches`. Already-enriched rows are skipped.
+
+**Dry run:**
+```powershell
+python tools/enrich_dreaming_urls.py --dry-run
+```
+
+**Requirements:** `dreaming-pp-cli` must be installed and on `PATH`
+(or set `DREAMING_CLI_PATH` in `.env`). See `.env.example` for all options.
+
+**Logs:** Each run appends a summary line to `.tmp/dreaming_enrichment.log` (configurable via `DREAMING_LOG_PATH`).
+
+---
+
 ## How It Works
 
 1. Reads all rows from the configured sheet tab
