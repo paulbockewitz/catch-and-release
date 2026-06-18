@@ -13,6 +13,7 @@ Walks a new user through every setup step needed to run sheets_to_anki.py:
   8. Note type verification
   9. Write .env
  10. Final dry run (optional)
+ 11. Spell-check script (optional)
 
 Run this once before using the workflow. Safe to re-run — completed steps are
 detected and skipped automatically.
@@ -824,6 +825,7 @@ def step9_write_env(sheet_id: str, deck: str, cookie: str, ankiweb_bin: str,
 # Step 10: Final dry run
 # ---------------------------------------------------------------------------
 
+
 def step10_dry_run():
     header(10, "Final check")
 
@@ -854,6 +856,37 @@ def step10_dry_run():
     else:
         warn("Dry run encountered issues. Check the output above.")
         info("You can re-run setup.py at any time to fix any step.")
+
+
+# ---------------------------------------------------------------------------
+# Step 11: Spell-check script (optional)
+# ---------------------------------------------------------------------------
+
+def step11_spell_check():
+    print(f"\n{'─' * 60}")
+    print(f"  OPTIONAL: Spell-check script for column A")
+    print(f"{'─' * 60}")
+
+    info("Auto-corrects spelling errors and missing accents in column A as you type.")
+    info("Uses the LanguageTool free API — no API key needed.")
+
+    if not yesno("Set it up now?", default=False):
+        info("You can set it up later — see workflows/vocab_spell_check.md")
+        return
+
+    print("""
+  Steps (takes about 2 minutes):
+
+    1. In your sheet: Extensions → Apps Script
+    2. Project Settings → check "Show appsscript.json manifest file in editor"
+    3. Click appsscript.json → replace all content with tools/appsscript.json → save
+    4. Click Code.gs → replace all content with tools/vocab_spell_check.gs → save
+    5. Select createTrigger in the function dropdown → Run → Allow permissions
+    6. Type "caida" in column A to verify — it should auto-correct to "caída"
+
+  Full instructions: workflows/vocab_spell_check.md
+""")
+    ok("Spell-check setup instructions shown")
 
 
 # ---------------------------------------------------------------------------
@@ -916,8 +949,8 @@ def main():
   This wizard will set up everything you need to automatically
   create Anki flashcards from a Google Sheet.
 
-  It will walk you through 10 steps. Already-completed steps
-  are detected and skipped automatically.
+  It will walk you through 10 steps (+ 1 optional). Already-completed
+  steps are detected and skipped automatically.
 
   Estimated time (first run): 5–10 minutes
 """)
@@ -964,6 +997,9 @@ def main():
 
     # Step 10: Dry run
     step10_dry_run()
+
+    # Step 11: Optional spell-check script
+    step11_spell_check()
 
 
 if __name__ == "__main__":
