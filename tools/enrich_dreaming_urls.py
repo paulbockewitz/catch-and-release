@@ -102,22 +102,30 @@ def read_sheet(service, sheet_id: str, tab: str) -> list:
         sys.exit(1)
 
 
-def write_cell(service, sheet_id: str, tab: str, sheet_row: int, col: str, value: str):
-    cell_range = f"'{tab}'!{col}{sheet_row}"
-    service.spreadsheets().values().update(
+def stage_write(pending: list, tab: str, sheet_row: int, col: str, value: str):
+    """Queue a cell write for later batch flush."""
+    pending.append({"range": f"'{tab}'!{col}{sheet_row}", "values": [[value]]})
+
+
+def flush_writes(service, sheet_id: str, pending: list):
+    """Send all queued writes in one batchUpdate call."""
+    if not pending:
+        return
+    service.spreadsheets().values().batchUpdate(
         spreadsheetId=sheet_id,
-        range=cell_range,
-        valueInputOption="USER_ENTERED",
-        body={"values": [[value]]},
+        body={"valueInputOption": "USER_ENTERED", "data": pending},
     ).execute()
+    pending.clear()
 
 
 def run_cmd(cmd: list) -> tuple:
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=30)
         return result.returncode, result.stdout.strip(), result.stderr.strip()
     except FileNotFoundError as exc:
         return -1, "", f"Command not found: {cmd[0]} — {exc}"
+    except subprocess.TimeoutExpired:
+        return -2, "", f"Command timed out after 30s: {cmd[0]}"
 
 
 def query_concordance(cli_path: str, spanish_word: str) -> tuple:
@@ -138,7 +146,7 @@ def query_concordance(cli_path: str, spanish_word: str) -> tuple:
         return None, None, 0, (stderr or stdout or f"exit code {code}")
 
     if not stdout:
-        return None, None, 0, None
+        return None, None, 0, "concordance returned exit 0 with no output — check CLI version or query syntax"
 
     try:
         hits = json.loads(stdout)
@@ -211,9 +219,9 @@ def main():
     # Verify CLI is reachable before touching the sheet
     probe_code, _, probe_err = run_cmd([cli_path, "--version"])
     if probe_code == -1:
-        print(f"WARNING: dreaming-pp-cli not found at {cli_path!r}. Skipping enrichment.", file=sys.stderr)
+        print(f"ERROR: dreaming-pp-cli not found at {cli_path!r}.", file=sys.stderr)
         print(f"  Install it or set DREAMING_CLI_PATH in .env.", file=sys.stderr)
-        sys.exit(0)
+        sys.exit(1)
 
     if args.dry_run:
         print("=" * 60)
@@ -236,6 +244,7 @@ def main():
     skipped    = 0
     errors     = 0
     log_lines  = []
+    pending    = []  # deferred writes — flushed in one batchUpdate at the end
 
     for i, row in enumerate(data_rows, start=header_row):
         sheet_row_num = i + 1
@@ -255,8 +264,7 @@ def main():
             print(f"  SKIP  row {sheet_row_num} — blank Spanish word")
             continue
 
-        # Skip when fully enriched (URL + timestamp both present, or URL is "no matches")
-        if current_url and (current_ts or current_url == NO_MATCHES):
+        if current_url:
             skipped += 1
             print(f"  SKIP  row {sheet_row_num} — already enriched  ({spanish})")
             continue
@@ -272,23 +280,38 @@ def main():
             continue
 
         if url:
-            cell_value = f"{url} ({count} matches)"
+            url_safe = url.replace('"', '""')
+            display = f"{url} ({count} matches)"
+            display_safe = display.replace('"', '""')
+            cell_value = f'=HYPERLINK("{url_safe}","{display_safe}")'
             enriched += 1
             if args.dry_run:
-                print(f"  WOULD WRITE  row {sheet_row_num}: {cell_value}  @ {hit_ts}")
+                print(f"  WOULD WRITE  row {sheet_row_num}: {display}  @ {hit_ts}")
             else:
                 if not current_url:
-                    write_cell(service, sheet_id, tab, sheet_row_num, url_col, cell_value)
+                    stage_write(pending, tab, sheet_row_num, url_col, cell_value)
                 if hit_ts:
-                    write_cell(service, sheet_id, tab, sheet_row_num, ts_col, hit_ts)
-                print(f"  WROTE  row {sheet_row_num}: {cell_value}  @ {hit_ts}")
+                    stage_write(pending, tab, sheet_row_num, ts_col, hit_ts)
+                print(f"  QUEUED row {sheet_row_num}: {display}  @ {hit_ts}")
         else:
             no_matches += 1
             if args.dry_run:
                 print(f"  WOULD WRITE  row {sheet_row_num}: {NO_MATCHES}")
             else:
-                write_cell(service, sheet_id, tab, sheet_row_num, url_col, NO_MATCHES)
-                print(f"  WROTE  row {sheet_row_num}: {NO_MATCHES}  ({spanish})")
+                stage_write(pending, tab, sheet_row_num, url_col, NO_MATCHES)
+                print(f"  QUEUED row {sheet_row_num}: {NO_MATCHES}  ({spanish})")
+
+    if pending:
+        print(f"\nFlushing {len(pending)} writes to Google Sheets...")
+        try:
+            flush_writes(service, sheet_id, pending)
+            print("  Done.")
+        except Exception as exc:
+            msg = f"ERROR flushing {len(pending)} writes to Google Sheets: {exc}"
+            print(f"\n  {msg}", file=sys.stderr)
+            log_lines.append(f"[{ts}] {msg}")
+            append_log(log_path, log_lines)
+            sys.exit(1)
 
     print()
     print("=" * 60)

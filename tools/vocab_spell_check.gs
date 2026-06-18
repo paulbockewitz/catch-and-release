@@ -65,6 +65,20 @@ function handleEdit(e) {
                     result.language.detectedLanguage.confidence) || 0;
   var isExpected = detectedCode.startsWith('es') || detectedCode.startsWith('en');
 
+  // When detected as English, also check Spanish — English may truncate a Spanish word
+  // (e.g. "lucido" → "lucid") when the correct fix is just an accent ("lúcido").
+  // If Spanish has an equal-or-closer correction, prefer it.
+  if (isExpected && detectedCode.startsWith('en')) {
+    var enFirst = firstCorrectedText(originalText, result);
+    if (enFirst) {
+      var esCheck = callLanguageTool(originalText, 'es');
+      var esFirst = firstCorrectedText(originalText, esCheck);
+      if (esFirst && editDistance(originalText, esFirst) <= editDistance(originalText, enFirst)) {
+        result = esCheck;
+      }
+    }
+  }
+
   if (!isExpected || confidence < 0.5) {
     // Auto-detect was unreliable (wrong language or too uncertain).
     // Try both Spanish and English explicitly, then apply whichever correction
@@ -75,14 +89,22 @@ function handleEdit(e) {
     // do not apply the unreliable detector's suggestions (e.g. Czech "imbalance" → "invádanse").
     var esResult = callLanguageTool(originalText, 'es');
     var enResult = callLanguageTool(originalText, 'en-US');
-    // If English finds no corrections, the word is valid English — bail rather than
-    // letting Spanish "correct" it (e.g. "imbalance" → "invádanse").
-    if (!firstCorrectedText(originalText, enResult)) return;
-    var chosen = closerResult(originalText, esResult, enResult);
-    if (chosen) {
-      result = chosen;
+    var esFirst = firstCorrectedText(originalText, esResult);
+    var enFirst = firstCorrectedText(originalText, enResult);
+    if (!enFirst) {
+      // English has no correction. Could be valid English (bail) or a Spanish word
+      // with only an accent error (apply). Accent fixes are edit distance ≤ 1;
+      // false-positive Spanish "corrections" of English words are much farther away.
+      // e.g. "imbalance" → "invádanse" (d≈8) should bail; "ultimamente" → "últimamente" (d=1) should apply.
+      if (!esFirst || editDistance(originalText, esFirst) > 1) return;
+      result = esResult;
     } else {
-      return;
+      var chosen = closerResult(originalText, esResult, enResult);
+      if (chosen) {
+        result = chosen;
+      } else {
+        return;
+      }
     }
   }
 
@@ -92,10 +114,14 @@ function handleEdit(e) {
   // Grammar, style, and punctuation are excluded; the PUNCTUATION and
   // TYPOGRAPHY categories are also disabled at the API level.
   var spellingMatches = (result.matches || []).filter(function(m) {
-    return m.rule &&
-           (m.rule.issueType === 'misspelling' || m.rule.issueType === 'typographical') &&
-           m.replacements &&
-           m.replacements.length > 0;
+    if (!m.rule) return false;
+    if (m.rule.issueType !== 'misspelling' && m.rule.issueType !== 'typographical') return false;
+    if (!m.replacements || m.replacements.length === 0) return false;
+    // Skip corrections that shorten the matched span — accent fixes are always the same
+    // length, and shrinking corrections (e.g. "lucido" → "lucid") are usually English
+    // misidentifying a Spanish word by dropping its final vowel.
+    if (m.replacements[0].value.length < m.length) return false;
+    return true;
   });
 
   if (spellingMatches.length === 0) return;
@@ -150,7 +176,8 @@ function firstCorrectedText(original, result) {
   var matches = (result.matches || []).filter(function(m) {
     return m.rule &&
            (m.rule.issueType === 'misspelling' || m.rule.issueType === 'typographical') &&
-           m.replacements && m.replacements.length > 0;
+           m.replacements && m.replacements.length > 0 &&
+           m.replacements[0].value.length >= m.length;
   });
   if (!matches.length) return null;
   var m = matches.sort(function(a, b) { return b.offset - a.offset; })[0];
