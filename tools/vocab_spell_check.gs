@@ -57,27 +57,29 @@ function handleEdit(e) {
   var result = callLanguageTool(originalText, 'auto');
   if (!result) return;
 
-  // Determine what language auto-detect returned.
   var detectedCode = (result.language &&
                       result.language.detectedLanguage &&
                       result.language.detectedLanguage.code) || '';
   var confidence = (result.language &&
                     result.language.detectedLanguage &&
                     result.language.detectedLanguage.confidence) || 0;
-
   var isExpected = detectedCode.startsWith('es') || detectedCode.startsWith('en');
 
   if (!isExpected || confidence < 0.5) {
-    // Auto-detect landed on a wrong language (e.g. Italian for "ultimamente")
-    // or was too uncertain. Retry with explicit Spanish so detection plays no
-    // role — the Spanish checker finds missing accents directly.
-    var retry = callLanguageTool(originalText, 'es');
-    if (retry) result = retry;
+    // Auto-detect was unreliable (wrong language or too uncertain).
+    // Try both Spanish and English explicitly, then apply whichever correction
+    // is closer to the original — edit distance breaks the ambiguity.
+    // Example: "distrubute" → es gives "distribuye" (d=2), en gives "distribute" (d=1) → en wins.
+    // Example: "ultimamente" → es gives "últimamente" (d=1), en gives nothing → es wins.
+    var esResult = callLanguageTool(originalText, 'es');
+    var enResult = callLanguageTool(originalText, 'en-US');
+    var chosen = closerResult(originalText, esResult, enResult);
+    if (chosen) result = chosen;
   }
 
   // Accept spelling errors and typographical errors (accent placement).
-  // "misspelling"  = wrong letters: covencion, caida (changes word meaning).
-  // "typographical" = accent only: ultimamente → últimamente.
+  // "misspelling"   = wrong letters: covencion, caida (changes word meaning).
+  // "typographical" = accent only:   ultimamente → últimamente.
   // Grammar, style, and punctuation are excluded; the PUNCTUATION and
   // TYPOGRAPHY categories are also disabled at the API level.
   var spellingMatches = (result.matches || []).filter(function(m) {
@@ -114,6 +116,57 @@ function handleEdit(e) {
     cell.setNote(originalText);
     cell.setValue(correctedText);
   }
+}
+
+/**
+ * Given two LanguageTool results, return the one whose first correction
+ * is closer (edit distance) to the original text. Prefers a result with
+ * corrections over one without.
+ */
+function closerResult(original, r1, r2) {
+  var c1 = firstCorrectedText(original, r1);
+  var c2 = firstCorrectedText(original, r2);
+  if (!c1 && !c2) return null;
+  if (!c1) return r2;
+  if (!c2) return r1;
+  return editDistance(original, c1) <= editDistance(original, c2) ? r1 : r2;
+}
+
+/**
+ * Apply the first spelling/typographical match from a result and return the
+ * corrected text, for use in edit-distance comparison only.
+ */
+function firstCorrectedText(original, result) {
+  if (!result) return null;
+  var matches = (result.matches || []).filter(function(m) {
+    return m.rule &&
+           (m.rule.issueType === 'misspelling' || m.rule.issueType === 'typographical') &&
+           m.replacements && m.replacements.length > 0;
+  });
+  if (!matches.length) return null;
+  var m = matches.sort(function(a, b) { return b.offset - a.offset; })[0];
+  return original.slice(0, m.offset) + m.replacements[0].value + original.slice(m.offset + m.length);
+}
+
+/**
+ * Levenshtein edit distance between two strings.
+ */
+function editDistance(a, b) {
+  var m = a.length, n = b.length, i, j;
+  var row = [];
+  for (j = 0; j <= n; j++) row[j] = j;
+  for (i = 1; i <= m; i++) {
+    var prev = i;
+    for (j = 1; j <= n; j++) {
+      var val = a[i - 1] === b[j - 1]
+        ? row[j - 1]
+        : 1 + Math.min(row[j], prev, row[j - 1]);
+      row[j - 1] = prev;
+      prev = val;
+    }
+    row[n] = prev;
+  }
+  return row[n];
 }
 
 /**
