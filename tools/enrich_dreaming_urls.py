@@ -122,8 +122,8 @@ def run_cmd(cmd: list) -> tuple:
 
 def query_concordance(cli_path: str, spanish_word: str) -> tuple:
     """
-    Returns (first_url, hit_count, error_message).
-    On success: (url_string_or_None, int, None).
+    Returns (first_url, first_timestamp, hit_count, error_message).
+    On success: (url_or_None, timestamp_or_None, int, None).
     On CLI-not-found: (-1 sentinel via error_message).
     """
     code, stdout, stderr = run_cmd([
@@ -132,25 +132,26 @@ def query_concordance(cli_path: str, spanish_word: str) -> tuple:
     ])
 
     if code == -1:
-        return None, 0, stderr
+        return None, None, 0, stderr
 
     if code != 0:
-        return None, 0, (stderr or stdout or f"exit code {code}")
+        return None, None, 0, (stderr or stdout or f"exit code {code}")
 
     if not stdout:
-        return None, 0, None
+        return None, None, 0, None
 
     try:
         hits = json.loads(stdout)
     except json.JSONDecodeError as exc:
-        return None, 0, f"JSON parse error: {exc}"
+        return None, None, 0, f"JSON parse error: {exc}"
 
     if not isinstance(hits, list) or len(hits) == 0:
-        return None, 0, None
+        return None, None, 0, None
 
     first = hits[0]
-    url = first.get("video_url") or first.get("url") or first.get("URL") or first.get("VideoURL") or ""
-    return url, len(hits), None
+    url       = first.get("video_url") or first.get("url") or first.get("URL") or first.get("VideoURL") or ""
+    timestamp = first.get("timestamp") or ""
+    return url, timestamp, len(hits), None
 
 
 def append_log(log_path: Path, lines: list):
@@ -184,8 +185,9 @@ def main():
     tab        = get_env("GOOGLE_SHEET_TAB", "Sheet1")
     front_col  = get_env("ANKI_FRONT_COL", "A")
     back_col   = get_env("ANKI_BACK_COL", "B")
-    lang_col   = get_env("DREAMING_LANG_COL", "C")   # "en" or "es" per row
+    lang_col   = get_env("DREAMING_LANG_COL", "C")        # "en" or "es" per row
     url_col    = get_env("DREAMING_URL_COLUMN", "E")
+    ts_col     = get_env("DREAMING_TIMESTAMP_COLUMN", "F")
     cli_path   = get_env("DREAMING_CLI_PATH", "dreaming-pp-cli")
     log_path   = Path(get_env("DREAMING_LOG_PATH", str(PROJECT_ROOT / ".tmp" / "dreaming_enrichment.log")))
 
@@ -201,6 +203,7 @@ def main():
         back_idx  = column_index_from_string(back_col)  - 1
         lang_idx  = column_index_from_string(lang_col)  - 1
         url_idx   = column_index_from_string(url_col)   - 1
+        ts_idx    = column_index_from_string(ts_col)    - 1
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         sys.exit(1)
@@ -244,20 +247,22 @@ def main():
         else:
             spanish = row[back_idx].strip()  if len(row) > back_idx  else ""
 
-        current = row[url_idx].strip() if len(row) > url_idx else ""
+        current_url = row[url_idx].strip() if len(row) > url_idx else ""
+        current_ts  = row[ts_idx].strip()  if len(row) > ts_idx  else ""
 
         if not spanish:
             skipped += 1
             print(f"  SKIP  row {sheet_row_num} — blank Spanish word")
             continue
 
-        if current:
+        # Skip when fully enriched (URL + timestamp both present, or URL is "no matches")
+        if current_url and (current_ts or current_url == NO_MATCHES):
             skipped += 1
             print(f"  SKIP  row {sheet_row_num} — already enriched  ({spanish})")
             continue
 
         print(f"  QUERY row {sheet_row_num}: {spanish!r} (col {'A' if detected_lang == 'es' else 'B'}) ...")
-        url, count, err = query_concordance(cli_path, spanish)
+        url, hit_ts, count, err = query_concordance(cli_path, spanish)
 
         if err:
             errors += 1
@@ -270,12 +275,14 @@ def main():
             cell_value = f"{url} ({count} matches)"
             enriched += 1
             if args.dry_run:
-                print(f"  WOULD WRITE  row {sheet_row_num}: {cell_value}")
+                print(f"  WOULD WRITE  row {sheet_row_num}: {cell_value}  @ {hit_ts}")
             else:
-                write_cell(service, sheet_id, tab, sheet_row_num, url_col, cell_value)
-                print(f"  WROTE  row {sheet_row_num}: {cell_value}")
+                if not current_url:
+                    write_cell(service, sheet_id, tab, sheet_row_num, url_col, cell_value)
+                if hit_ts:
+                    write_cell(service, sheet_id, tab, sheet_row_num, ts_col, hit_ts)
+                print(f"  WROTE  row {sheet_row_num}: {cell_value}  @ {hit_ts}")
         else:
-            cell_value = NO_MATCHES
             no_matches += 1
             if args.dry_run:
                 print(f"  WOULD WRITE  row {sheet_row_num}: {NO_MATCHES}")
