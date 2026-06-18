@@ -65,6 +65,20 @@ function handleEdit(e) {
                     result.language.detectedLanguage.confidence) || 0;
   var isExpected = detectedCode.startsWith('es') || detectedCode.startsWith('en');
 
+  // When detected as English, also check Spanish — English may truncate a Spanish word
+  // (e.g. "lucido" → "lucid") when the correct fix is just an accent ("lúcido").
+  // If Spanish has an equal-or-closer correction, prefer it.
+  if (isExpected && detectedCode.startsWith('en')) {
+    var enFirst = firstCorrectedText(originalText, result);
+    if (enFirst) {
+      var esCheck = callLanguageTool(originalText, 'es');
+      var esFirst = firstCorrectedText(originalText, esCheck);
+      if (esFirst && editDistance(originalText, esFirst) <= editDistance(originalText, enFirst)) {
+        result = esCheck;
+      }
+    }
+  }
+
   if (!isExpected || confidence < 0.5) {
     // Auto-detect was unreliable (wrong language or too uncertain).
     // Try both Spanish and English explicitly, then apply whichever correction
