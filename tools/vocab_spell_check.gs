@@ -89,14 +89,22 @@ function handleEdit(e) {
     // do not apply the unreliable detector's suggestions (e.g. Czech "imbalance" → "invádanse").
     var esResult = callLanguageTool(originalText, 'es');
     var enResult = callLanguageTool(originalText, 'en-US');
-    // If English finds no corrections, the word is valid English — bail rather than
-    // letting Spanish "correct" it (e.g. "imbalance" → "invádanse").
-    if (!firstCorrectedText(originalText, enResult)) return;
-    var chosen = closerResult(originalText, esResult, enResult);
-    if (chosen) {
-      result = chosen;
+    var esFirst = firstCorrectedText(originalText, esResult);
+    var enFirst = firstCorrectedText(originalText, enResult);
+    if (!enFirst) {
+      // English has no correction. Could be valid English (bail) or a Spanish word
+      // with only an accent error (apply). Accent fixes are edit distance ≤ 1;
+      // false-positive Spanish "corrections" of English words are much farther away.
+      // e.g. "imbalance" → "invádanse" (d≈8) should bail; "ultimamente" → "últimamente" (d=1) should apply.
+      if (!esFirst || editDistance(originalText, esFirst) > 1) return;
+      result = esResult;
     } else {
-      return;
+      var chosen = closerResult(originalText, esResult, enResult);
+      if (chosen) {
+        result = chosen;
+      } else {
+        return;
+      }
     }
   }
 
@@ -168,7 +176,8 @@ function firstCorrectedText(original, result) {
   var matches = (result.matches || []).filter(function(m) {
     return m.rule &&
            (m.rule.issueType === 'misspelling' || m.rule.issueType === 'typographical') &&
-           m.replacements && m.replacements.length > 0;
+           m.replacements && m.replacements.length > 0 &&
+           m.replacements[0].value.length >= m.length;
   });
   if (!matches.length) return null;
   var m = matches.sort(function(a, b) { return b.offset - a.offset; })[0];
