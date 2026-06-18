@@ -71,10 +71,19 @@ function handleEdit(e) {
     // is closer to the original — edit distance breaks the ambiguity.
     // Example: "distrubute" → es gives "distribuye" (d=2), en gives "distribute" (d=1) → en wins.
     // Example: "ultimamente" → es gives "últimamente" (d=1), en gives nothing → es wins.
+    // If neither finds corrections, the word is already correct in its own language —
+    // do not apply the unreliable detector's suggestions (e.g. Czech "imbalance" → "invádanse").
     var esResult = callLanguageTool(originalText, 'es');
     var enResult = callLanguageTool(originalText, 'en-US');
+    // If English finds no corrections, the word is valid English — bail rather than
+    // letting Spanish "correct" it (e.g. "imbalance" → "invádanse").
+    if (!firstCorrectedText(originalText, enResult)) return;
     var chosen = closerResult(originalText, esResult, enResult);
-    if (chosen) result = chosen;
+    if (chosen) {
+      result = chosen;
+    } else {
+      return;
+    }
   }
 
   // Accept spelling errors and typographical errors (accent placement).
