@@ -182,7 +182,9 @@ def main():
 
     sheet_id   = get_env("GOOGLE_SHEET_ID")
     tab        = get_env("GOOGLE_SHEET_TAB", "Sheet1")
+    front_col  = get_env("ANKI_FRONT_COL", "A")
     back_col   = get_env("ANKI_BACK_COL", "B")
+    lang_col   = get_env("DREAMING_LANG_COL", "C")   # "en" or "es" per row
     url_col    = get_env("DREAMING_URL_COLUMN", "E")
     cli_path   = get_env("DREAMING_CLI_PATH", "dreaming-pp-cli")
     log_path   = Path(get_env("DREAMING_LOG_PATH", str(PROJECT_ROOT / ".tmp" / "dreaming_enrichment.log")))
@@ -195,8 +197,10 @@ def main():
         sys.exit(1)
 
     try:
-        back_idx = column_index_from_string(back_col) - 1
-        url_idx  = column_index_from_string(url_col)  - 1
+        front_idx = column_index_from_string(front_col) - 1
+        back_idx  = column_index_from_string(back_col)  - 1
+        lang_idx  = column_index_from_string(lang_col)  - 1
+        url_idx   = column_index_from_string(url_col)   - 1
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         sys.exit(1)
@@ -233,8 +237,14 @@ def main():
     for i, row in enumerate(data_rows, start=header_row):
         sheet_row_num = i + 1
 
-        spanish = row[back_idx].strip() if len(row) > back_idx else ""
-        current = row[url_idx].strip()  if len(row) > url_idx  else ""
+        detected_lang = row[lang_idx].strip().lower() if len(row) > lang_idx else ""
+        # "es" → input (col A) is Spanish; "en" → translation (col B) is Spanish
+        if detected_lang == "es":
+            spanish = row[front_idx].strip() if len(row) > front_idx else ""
+        else:
+            spanish = row[back_idx].strip()  if len(row) > back_idx  else ""
+
+        current = row[url_idx].strip() if len(row) > url_idx else ""
 
         if not spanish:
             skipped += 1
@@ -246,7 +256,7 @@ def main():
             print(f"  SKIP  row {sheet_row_num} — already enriched  ({spanish})")
             continue
 
-        print(f"  QUERY row {sheet_row_num}: {spanish!r} ...")
+        print(f"  QUERY row {sheet_row_num}: {spanish!r} (col {'A' if detected_lang == 'es' else 'B'}) ...")
         url, count, err = query_concordance(cli_path, spanish)
 
         if err:
