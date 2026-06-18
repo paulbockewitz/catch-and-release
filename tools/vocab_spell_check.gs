@@ -54,24 +54,35 @@ function handleEdit(e) {
   var originalText = cell.getValue();
   if (typeof originalText !== 'string' || originalText.trim() === '') return;
 
-  var result = callLanguageTool(originalText);
+  var result = callLanguageTool(originalText, 'auto');
   if (!result) return;
 
-  // When language was auto-detected, require confidence >= 0.5.
-  // Single short words are prone to misidentification; a low-confidence
-  // response is more likely to produce wrong corrections than right ones.
-  var detectedLang = result.language && result.language.detectedLanguage;
-  if (detectedLang && typeof detectedLang.confidence === 'number' &&
-      detectedLang.confidence < 0.5) {
-    cell.setNote('LT: low confidence');
-    return;
+  // Determine what language auto-detect returned.
+  var detectedCode = (result.language &&
+                      result.language.detectedLanguage &&
+                      result.language.detectedLanguage.code) || '';
+  var confidence = (result.language &&
+                    result.language.detectedLanguage &&
+                    result.language.detectedLanguage.confidence) || 0;
+
+  var isExpected = detectedCode.startsWith('es') || detectedCode.startsWith('en');
+
+  if (!isExpected || confidence < 0.5) {
+    // Auto-detect landed on a wrong language (e.g. Italian for "ultimamente")
+    // or was too uncertain. Retry with explicit Spanish so detection plays no
+    // role — the Spanish checker finds missing accents directly.
+    var retry = callLanguageTool(originalText, 'es');
+    if (retry) result = retry;
   }
 
-  // Keep only spelling matches that have at least one replacement suggestion.
-  // Grammar, style, and punctuation matches are intentionally ignored.
+  // Accept spelling errors and typographical errors (accent placement).
+  // "misspelling"  = wrong letters: covencion, caida (changes word meaning).
+  // "typographical" = accent only: ultimamente → últimamente.
+  // Grammar, style, and punctuation are excluded; the PUNCTUATION and
+  // TYPOGRAPHY categories are also disabled at the API level.
   var spellingMatches = (result.matches || []).filter(function(m) {
     return m.rule &&
-           m.rule.issueType === 'misspelling' &&
+           (m.rule.issueType === 'misspelling' || m.rule.issueType === 'typographical') &&
            m.replacements &&
            m.replacements.length > 0;
   });
@@ -89,6 +100,16 @@ function handleEdit(e) {
                     correctedText.slice(match.offset + match.length);
   });
 
+  // Preserve original first-character case. LanguageTool treats single words
+  // as sentence starts and may capitalize them even when the input was lowercase.
+  if (correctedText.length > 0 && originalText.length > 0) {
+    var origFirst = originalText[0];
+    var corrFirst = correctedText[0];
+    if (origFirst === origFirst.toLowerCase() && corrFirst === corrFirst.toUpperCase()) {
+      correctedText = corrFirst.toLowerCase() + correctedText.slice(1);
+    }
+  }
+
   if (correctedText !== originalText) {
     cell.setNote(originalText);
     cell.setValue(correctedText);
@@ -99,17 +120,22 @@ function handleEdit(e) {
  * POST to the LanguageTool free REST API.
  *
  * @param {string} text - Text to check
+ * @param {string} language - Language code ('auto', 'es', 'en-US', etc.)
  * @returns {Object|null} Parsed JSON response, or null on any error
  */
-function callLanguageTool(text) {
+function callLanguageTool(text, language) {
+  var payload = {
+    text: text,
+    language: language,
+    disabledCategories: 'PUNCTUATION,TYPOGRAPHY'
+  };
+  if (language === 'auto') {
+    payload.preferredVariants = 'es-ES,en-US';
+  }
+
   var options = {
     method: 'post',
-    payload: {
-      text: text,
-      language: 'auto',
-      preferredVariants: 'es-ES,en-US',
-      disabledCategories: 'PUNCTUATION,TYPOGRAPHY'
-    },
+    payload: payload,
     muteHttpExceptions: true
   };
 
