@@ -149,7 +149,7 @@ def query_concordance(cli_path: str, spanish_word: str) -> tuple:
         return None, 0, None
 
     first = hits[0]
-    url = first.get("url") or first.get("URL") or first.get("VideoURL") or ""
+    url = first.get("video_url") or first.get("url") or first.get("URL") or first.get("VideoURL") or ""
     return url, len(hits), None
 
 
