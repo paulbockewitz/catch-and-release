@@ -32,11 +32,12 @@ Auto-corrects spelling errors and missing accents in column A of the vocabulary 
 2. Replace all existing content with the contents of `tools/appsscript.json` from this repo.
 3. Save (Ctrl+S or the floppy disk icon).
 
-The manifest declares two OAuth scopes:
+The manifest declares three OAuth scopes:
 - `https://www.googleapis.com/auth/spreadsheets` — read and write sheet cells
 - `https://www.googleapis.com/auth/script.external_request` — call LanguageTool via `UrlFetchApp`
+- `https://www.googleapis.com/auth/script.scriptapp` — register and read installable triggers via `ScriptApp`
 
-Without the `external_request` scope, `UrlFetchApp.fetch()` silently fails under an installable trigger.
+Without `external_request`, `UrlFetchApp.fetch()` silently fails. Without `script.scriptapp`, `createTrigger()` throws a permissions error.
 
 ### Step 4: Paste the script
 
