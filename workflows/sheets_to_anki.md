@@ -66,6 +66,10 @@ ANKIWEB_CLI_PATH=C:\Users\paulb\printing-press\library\ankiweb\ankiweb-pp-cli.ex
 LOG_DIR=.tmp
 ```
 
+### 5. Optional: install the spell-check script
+
+To auto-correct spelling errors and missing accents in column A as you type, set up the Google Apps Script spell-checker — see `workflows/vocab_spell_check.md`.
+
 ---
 
 ## Running the Workflow
