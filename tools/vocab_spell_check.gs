@@ -75,6 +75,9 @@ function handleEdit(e) {
     // do not apply the unreliable detector's suggestions (e.g. Czech "imbalance" → "invádanse").
     var esResult = callLanguageTool(originalText, 'es');
     var enResult = callLanguageTool(originalText, 'en-US');
+    // If English finds no corrections, the word is valid English — bail rather than
+    // letting Spanish "correct" it (e.g. "imbalance" → "invádanse").
+    if (!firstCorrectedText(originalText, enResult)) return;
     var chosen = closerResult(originalText, esResult, enResult);
     if (chosen) {
       result = chosen;
