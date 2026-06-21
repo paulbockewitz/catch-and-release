@@ -54,58 +54,39 @@ function handleEdit(e) {
   var originalText = cell.getValue();
   if (typeof originalText !== 'string' || originalText.trim() === '') return;
 
-  var result = callLanguageTool(originalText, 'auto');
-  if (!result) return;
+  var row = cell.getRow();
+  var sheet = cell.getSheet();
+  var result;
+  var detectedLang;
 
-  var detectedCode = (result.language &&
-                      result.language.detectedLanguage &&
-                      result.language.detectedLanguage.code) || '';
-  var confidence = (result.language &&
-                    result.language.detectedLanguage &&
-                    result.language.detectedLanguage.confidence) || 0;
-  var isExpected = detectedCode.startsWith('es') || detectedCode.startsWith('en');
-
-  // When detected as English, also check Spanish — English may truncate a Spanish word
-  // (e.g. "lucido" → "lucid") when the correct fix is just an accent ("lúcido").
-  // If Spanish has an equal-or-closer correction, prefer it.
-  if (isExpected && detectedCode.startsWith('en')) {
-    var enFirst = firstCorrectedText(originalText, result);
-    if (enFirst) {
-      var esCheck = callLanguageTool(originalText, 'es');
-      var esFirst = firstCorrectedText(originalText, esCheck);
-      if (esFirst && editDistance(originalText, esFirst) <= editDistance(originalText, enFirst)) {
-        result = esCheck;
-      }
-    }
-  }
-
-  if (!isExpected || confidence < 0.5) {
-    // Auto-detect was unreliable (wrong language or too uncertain).
-    // Try both Spanish and English explicitly, then apply whichever correction
-    // is closer to the original — edit distance breaks the ambiguity.
-    // Example: "distrubute" → es gives "distribuye" (d=2), en gives "distribute" (d=1) → en wins.
-    // Example: "ultimamente" → es gives "últimamente" (d=1), en gives nothing → es wins.
-    // If neither finds corrections, the word is already correct in its own language —
-    // do not apply the unreliable detector's suggestions (e.g. Czech "imbalance" → "invádanse").
+  if (/[ñáéíóúüÁÉÍÓÚÜ¿¡]/.test(originalText)) {
+    // Spanish diacritics present — unambiguously Spanish. Call LT es only.
+    result = callLanguageTool(originalText, 'es');
+    if (!result) return;
+    detectedLang = 'es';
+  } else {
+    // No diacritics — call both endpoints and use the zero-match oracle.
     var esResult = callLanguageTool(originalText, 'es');
     var enResult = callLanguageTool(originalText, 'en-US');
-    var esFirst = firstCorrectedText(originalText, esResult);
-    var enFirst = firstCorrectedText(originalText, enResult);
-    if (!enFirst) {
-      // English has no correction. Could be valid English (bail) or a Spanish word
-      // with only an accent error (apply). Accent fixes are edit distance ≤ 1;
-      // false-positive Spanish "corrections" of English words are much farther away.
-      // e.g. "imbalance" → "invádanse" (d≈8) should bail; "ultimamente" → "últimamente" (d=1) should apply.
-      if (!esFirst || editDistance(originalText, esFirst) > 1) return;
-      result = esResult;
-    } else {
-      var chosen = closerResult(originalText, esResult, enResult);
-      if (chosen) {
-        result = chosen;
-      } else {
-        return;
-      }
-    }
+    if (!esResult && !enResult) return;
+    var detected = detectLanguage(originalText, esResult, enResult);
+    detectedLang = detected.lang;
+    result = detected.result;
+    if (!result) return;
+  }
+
+  // Write detected language to column C (1-based column 3).
+  sheet.getRange(row, 3).setValue(detectedLang);
+
+  // Write GOOGLETRANSLATE formula to column B if currently empty.
+  // This write happens unconditionally (before the spelling-correction check)
+  // so that correctly-spelled words (spellingMatches.length === 0) also get
+  // their translation formula — not just words that needed correction.
+  var bCell = sheet.getRange(row, 2);
+  if (bCell.getValue() === '') {
+    bCell.setFormula(
+      '=IF(A' + row + '="","",IFERROR(GOOGLETRANSLATE(A' + row + ',C' + row + ',IF(C' + row + '="es","en","es")),"))'
+    );
   }
 
   // Accept spelling errors and typographical errors (accent placement).
@@ -113,16 +94,7 @@ function handleEdit(e) {
   // "typographical" = accent only:   ultimamente → últimamente.
   // Grammar, style, and punctuation are excluded; the PUNCTUATION and
   // TYPOGRAPHY categories are also disabled at the API level.
-  var spellingMatches = (result.matches || []).filter(function(m) {
-    if (!m.rule) return false;
-    if (m.rule.issueType !== 'misspelling' && m.rule.issueType !== 'typographical') return false;
-    if (!m.replacements || m.replacements.length === 0) return false;
-    // Skip corrections that shorten the matched span — accent fixes are always the same
-    // length, and shrinking corrections (e.g. "lucido" → "lucid") are usually English
-    // misidentifying a Spanish word by dropping its final vowel.
-    if (m.replacements[0].value.length < m.length) return false;
-    return true;
-  });
+  var spellingMatches = (result.matches || []).filter(isSpellingIssue);
 
   if (spellingMatches.length === 0) return;
 
@@ -173,12 +145,7 @@ function closerResult(original, r1, r2) {
  */
 function firstCorrectedText(original, result) {
   if (!result) return null;
-  var matches = (result.matches || []).filter(function(m) {
-    return m.rule &&
-           (m.rule.issueType === 'misspelling' || m.rule.issueType === 'typographical') &&
-           m.replacements && m.replacements.length > 0 &&
-           m.replacements[0].value.length >= m.length;
-  });
+  var matches = (result.matches || []).filter(isSpellingIssue);
   if (!matches.length) return null;
   var m = matches.sort(function(a, b) { return b.offset - a.offset; })[0];
   return original.slice(0, m.offset) + m.replacements[0].value + original.slice(m.offset + m.length);
@@ -209,7 +176,7 @@ function editDistance(a, b) {
  * POST to the LanguageTool free REST API.
  *
  * @param {string} text - Text to check
- * @param {string} language - Language code ('auto', 'es', 'en-US', etc.)
+ * @param {string} language - Language code ('es', 'en-US', etc.)
  * @returns {Object|null} Parsed JSON response, or null on any error
  */
 function callLanguageTool(text, language) {
@@ -218,9 +185,6 @@ function callLanguageTool(text, language) {
     language: language,
     disabledCategories: 'PUNCTUATION,TYPOGRAPHY'
   };
-  if (language === 'auto') {
-    payload.preferredVariants = 'es-ES,en-US';
-  }
 
   var options = {
     method: 'post',
@@ -237,5 +201,71 @@ function callLanguageTool(text, language) {
     return JSON.parse(response.getContentText());
   } catch (err) {
     return null;
+  }
+}
+
+/**
+ * Returns true for matches that represent a genuine spelling or accent error.
+ * Used in detectLanguage, spellingMatches, and firstCorrectedText — all three
+ * must use this identical predicate. Divergence causes the zero-match oracle
+ * to count candidates the correction step would reject, producing wrong language
+ * attribution. See docs/solutions/logic-errors/spanish-accent-guard-english-bailout-regression.md
+ */
+function isSpellingIssue(m) {
+  return m.rule &&
+    (m.rule.issueType === 'misspelling' || m.rule.issueType === 'typographical') &&
+    m.replacements && m.replacements.length > 0 &&
+    m.replacements[0].value.length >= m.length;
+}
+
+/**
+ * Determine language from LanguageTool results using the zero-match oracle.
+ * The endpoint that returns zero spelling/typographical matches accepts the
+ * word as valid in that language; the other endpoint wins.
+ *
+ * @param {string} text - Original text (used for closerResult tiebreaker)
+ * @param {Object|null} esResult - LT response for 'es'
+ * @param {Object|null} enResult - LT response for 'en-US'
+ * @returns {{lang: string, result: Object}} Detected language and result to use for correction
+ */
+function detectLanguage(text, esResult, enResult) {
+  var esMatches = esResult ? (esResult.matches || []).filter(isSpellingIssue) : null;
+  var enMatches = enResult ? (enResult.matches || []).filter(isSpellingIssue) : null;
+
+  // If one call failed entirely, the other language wins by default.
+  if (!esMatches) return {lang: 'en', result: enResult};
+  if (!enMatches) return {lang: 'es', result: esResult};
+
+  var esCount = esMatches.length;
+  var enCount = enMatches.length;
+
+  if (esCount === 0 && enCount > 0) return {lang: 'es', result: esResult};
+  if (enCount === 0 && esCount > 0) return {lang: 'en', result: enResult};
+  if (esCount === 0 && enCount === 0) return {lang: 'es', result: esResult}; // R5 tiebreaker
+
+  // Both flag the word (misspelled in both) — pick the language whose correction
+  // is closest to the original. e.g. "caida": es→"caída" (d=1) beats en→"coaid" (d≫1).
+  var chosen = closerResult(text, esResult, enResult);
+  return {lang: chosen === esResult ? 'es' : 'en', result: chosen || esResult};
+}
+
+/**
+ * One-time backfill: writes the GOOGLETRANSLATE formula to column B for all
+ * rows where column A is non-empty and column B is currently empty.
+ * Run once from Extensions > Apps Script after deploying the updated GAS.
+ */
+function setupTranslationFormulas() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+
+  var data = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+  for (var i = 0; i < data.length; i++) {
+    var row = i + 2;
+    if (data[i][0] !== '' && data[i][1] === '') {
+      sheet.getRange(row, 2).setFormula(
+        '=IF(A' + row + '="","",IFERROR(GOOGLETRANSLATE(A' + row + ',C' + row + ',IF(C' + row + '="es","en","es")),"))'
+      );
+    }
   }
 }
