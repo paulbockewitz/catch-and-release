@@ -205,11 +205,12 @@ function callLanguageTool(text, language) {
 }
 
 /**
- * Returns true for matches that represent a genuine spelling or accent error.
- * Used in detectLanguage, spellingMatches, and firstCorrectedText — all three
- * must use this identical predicate. Divergence causes the zero-match oracle
- * to count candidates the correction step would reject, producing wrong language
- * attribution. See docs/solutions/logic-errors/spanish-accent-guard-english-bailout-regression.md
+ * Returns true for matches that represent a genuine spelling or accent error
+ * AND whose replacement is at least as long as the original span. The length
+ * guard prevents applying shortening corrections (e.g. "lucido"→"lucid").
+ * Used by spellingMatches and firstCorrectedText — both must stay in sync.
+ * detectLanguage uses a broader filter (isDetectionIssue, defined inline)
+ * so that short-replacement foreign-word flags still count toward detection.
  */
 function isSpellingIssue(m) {
   return m.rule &&
@@ -219,18 +220,27 @@ function isSpellingIssue(m) {
 }
 
 /**
- * Determine language from LanguageTool results using the zero-match oracle.
- * The endpoint that returns zero spelling/typographical matches accepts the
- * word as valid in that language; the other endpoint wins.
+ * Determine language from LanguageTool results.
  *
- * @param {string} text - Original text (used for closerResult tiebreaker)
+ * Detection uses a broader filter than correction: any misspelling/typographical
+ * flag counts regardless of replacement length. This is necessary because LT may
+ * suggest shorter replacements for foreign words (e.g. "however"→"hoy" in LT es),
+ * which the correction filter would exclude but which still signal "wrong language."
+ *
+ * @param {string} text - Original text (used for tiebreaker)
  * @param {Object|null} esResult - LT response for 'es'
  * @param {Object|null} enResult - LT response for 'en-US'
  * @returns {{lang: string, result: Object}} Detected language and result to use for correction
  */
 function detectLanguage(text, esResult, enResult) {
-  var esMatches = esResult ? (esResult.matches || []).filter(isSpellingIssue) : null;
-  var enMatches = enResult ? (enResult.matches || []).filter(isSpellingIssue) : null;
+  function isDetectionIssue(m) {
+    return m.rule &&
+      (m.rule.issueType === 'misspelling' || m.rule.issueType === 'typographical') &&
+      m.replacements && m.replacements.length > 0;
+  }
+
+  var esMatches = esResult ? (esResult.matches || []).filter(isDetectionIssue) : null;
+  var enMatches = enResult ? (enResult.matches || []).filter(isDetectionIssue) : null;
 
   // If one call failed entirely, the other language wins by default.
   if (!esMatches) return {lang: 'en', result: enResult};
@@ -239,12 +249,24 @@ function detectLanguage(text, esResult, enResult) {
   var esCount = esMatches.length;
   var enCount = enMatches.length;
 
+  // LT es accepts it; LT en flags it → Spanish.
   if (esCount === 0 && enCount > 0) return {lang: 'es', result: esResult};
-  if (enCount === 0 && esCount > 0) return {lang: 'en', result: enResult};
+
+  // LT en accepts it; LT es flags it. Two possibilities:
+  //   (a) English word that LT en knows is valid.
+  //   (b) Spanish word with an accent error (e.g. "caida"→"caída").
+  // Discriminate by edit distance: accent fixes are always edit distance ≤ 1.
+  // If LT es's correction is close (d ≤ 1), it's a Spanish accent error.
+  // If LT es's correction is far (or filtered out by the length guard), it's English.
+  if (enCount === 0 && esCount > 0) {
+    var esFirst = firstCorrectedText(text, esResult); // uses isSpellingIssue (length-guarded)
+    if (esFirst && editDistance(text, esFirst) <= 1) return {lang: 'es', result: esResult};
+    return {lang: 'en', result: enResult};
+  }
+
   if (esCount === 0 && enCount === 0) return {lang: 'es', result: esResult}; // R5 tiebreaker
 
-  // Both flag the word (misspelled in both) — pick the language whose correction
-  // is closest to the original. e.g. "caida": es→"caída" (d=1) beats en→"coaid" (d≫1).
+  // Both flag the word — pick the language whose correction is closest to the original.
   var chosen = closerResult(text, esResult, enResult);
   return {lang: chosen === esResult ? 'es' : 'en', result: chosen || esResult};
 }
