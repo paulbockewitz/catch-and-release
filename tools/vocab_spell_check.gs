@@ -56,6 +56,8 @@ function handleEdit(e) {
 
   var row = cell.getRow();
   var sheet = cell.getSheet();
+  if (row < 2) return; // Skip header row — never overwrite col B/C headers
+
   var result;
   var detectedLang;
 
@@ -268,7 +270,10 @@ function detectLanguage(text, esResult, enResult) {
 
   // Both flag the word — pick the language whose correction is closest to the original.
   var chosen = closerResult(text, esResult, enResult);
-  return {lang: chosen === esResult ? 'es' : 'en', result: chosen || esResult};
+  // closerResult returns null when both results have detection matches but neither has
+  // spelling-issue matches (all suggestions shorten the span). Fall back to R5 tiebreaker.
+  if (!chosen) return {lang: 'es', result: esResult};
+  return {lang: chosen === esResult ? 'es' : 'en', result: chosen};
 }
 
 /**
