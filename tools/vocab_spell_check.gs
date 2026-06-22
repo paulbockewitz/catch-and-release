@@ -8,6 +8,20 @@
 // the installable trigger. Simple onEdit cannot call UrlFetchApp — the
 // installable trigger is required.
 
+var COL_VOCAB       = 1; // Column A — word input
+var COL_TRANSLATION = 2; // Column B — GOOGLETRANSLATE formula
+var COL_LANG        = 3; // Column C — detected language code ('es' or 'en')
+
+/**
+ * Build the GOOGLETRANSLATE formula for a given row.
+ * Translates col A → col B based on the language code in col C:
+ *   col C = "es" → source is Spanish, target is English
+ *   col C = "en" → source is English, target is Spanish
+ */
+function translateFormula(row) {
+  return '=IF(A' + row + '="","",IFERROR(GOOGLETRANSLATE(A' + row + ',C' + row + ',IF(C' + row + '="es","en","es")),"))';
+}
+
 /**
  * Run once to register the installable onEdit trigger pointing at handleEdit.
  * Guards against duplicate registration by checking existing triggers first.
@@ -40,7 +54,7 @@ function handleEdit(e) {
   var range = e.range;
 
   // Act only on column A (1-based index)
-  if (range.getColumn() !== 1) return;
+  if (range.getColumn() !== COL_VOCAB) return;
 
   // For single-cell edits, use the edited range.
   // For bulk pastes (numRows > 1), correct only the first row.
@@ -48,7 +62,7 @@ function handleEdit(e) {
   if (range.getNumRows() === 1) {
     cell = range;
   } else {
-    cell = range.getSheet().getRange(range.getRow(), 1);
+    cell = range.getSheet().getRange(range.getRow(), COL_VOCAB);
   }
 
   var originalText = cell.getValue();
@@ -77,18 +91,31 @@ function handleEdit(e) {
     if (!result) return;
   }
 
-  // Write detected language to column C (1-based column 3).
-  sheet.getRange(row, 3).setValue(detectedLang);
+  // Write detected language to column C.
+  // Skip the write when a multi-column paste already populated col C so we
+  // don't overwrite the user's pasted value. For single-col edits (the common
+  // case) range.getLastColumn() === 1 < 3, so the write always fires.
+  try {
+    if (range.getLastColumn() < COL_LANG) {
+      sheet.getRange(row, COL_LANG).setValue(detectedLang);
+    }
+  } catch (err) {
+    Logger.log('handleEdit: col C write failed: ' + err.message);
+  }
 
   // Write GOOGLETRANSLATE formula to column B if currently empty.
   // This write happens unconditionally (before the spelling-correction check)
   // so that correctly-spelled words (spellingMatches.length === 0) also get
   // their translation formula — not just words that needed correction.
-  var bCell = sheet.getRange(row, 2);
-  if (bCell.getValue() === '') {
-    bCell.setFormula(
-      '=IF(A' + row + '="","",IFERROR(GOOGLETRANSLATE(A' + row + ',C' + row + ',IF(C' + row + '="es","en","es")),"))'
-    );
+  // Check both getValue() and getFormula() so we don't overwrite a custom
+  // formula that currently evaluates to empty because col A was just filled.
+  try {
+    var bCell = sheet.getRange(row, COL_TRANSLATION);
+    if (bCell.getValue() === '' && bCell.getFormula() === '') {
+      bCell.setFormula(translateFormula(row));
+    }
+  } catch (err) {
+    Logger.log('handleEdit: col B write failed: ' + err.message);
   }
 
   // Accept spelling errors and typographical errors (accent placement).
@@ -122,8 +149,12 @@ function handleEdit(e) {
   }
 
   if (correctedText !== originalText) {
-    cell.setNote(originalText);
-    cell.setValue(correctedText);
+    try {
+      cell.setNote(originalText);
+      cell.setValue(correctedText);
+    } catch (err) {
+      Logger.log('handleEdit: correction write failed: ' + err.message);
+    }
   }
 }
 
@@ -199,48 +230,59 @@ function callLanguageTool(text, language) {
       'https://api.languagetool.org/v2/check',
       options
     );
-    if (response.getResponseCode() !== 200) return null;
+    if (response.getResponseCode() !== 200) {
+      Logger.log('LanguageTool ' + language + ' HTTP ' + response.getResponseCode());
+      return null;
+    }
     return JSON.parse(response.getContentText());
   } catch (err) {
+    Logger.log('LanguageTool ' + language + ' fetch error: ' + err.message);
     return null;
   }
+}
+
+/**
+ * Returns true for matches that count as a detection signal — any
+ * misspelling/typographical flag regardless of replacement length.
+ *
+ * The length guard is intentionally absent here: a short-replacement suggestion
+ * (e.g. LT es proposing "hoy" for "however", 3 < 7) still signals that the word
+ * does not belong to that language and should count for detection, even though it
+ * would be rejected by isSpellingIssue as a correction.
+ */
+function isDetectionIssue(m) {
+  return m.rule &&
+    (m.rule.issueType === 'misspelling' || m.rule.issueType === 'typographical') &&
+    m.replacements && m.replacements.length > 0;
 }
 
 /**
  * Returns true for matches that represent a genuine spelling or accent error
  * AND whose replacement is at least as long as the original span. The length
  * guard prevents applying shortening corrections (e.g. "lucido"→"lucid").
- * Used by spellingMatches and firstCorrectedText — both must stay in sync.
- * detectLanguage uses a broader filter (isDetectionIssue, defined inline)
- * so that short-replacement foreign-word flags still count toward detection.
+ * Used by spellingMatches and firstCorrectedText.
+ *
+ * Intentional divergence from isDetectionIssue: detection counts short-replacement
+ * foreign-word flags as signals; correction must not apply them.
  */
 function isSpellingIssue(m) {
-  return m.rule &&
-    (m.rule.issueType === 'misspelling' || m.rule.issueType === 'typographical') &&
-    m.replacements && m.replacements.length > 0 &&
-    m.replacements[0].value.length >= m.length;
+  return isDetectionIssue(m) && m.replacements[0].value.length >= m.length;
 }
 
 /**
  * Determine language from LanguageTool results.
  *
- * Detection uses a broader filter than correction: any misspelling/typographical
- * flag counts regardless of replacement length. This is necessary because LT may
- * suggest shorter replacements for foreign words (e.g. "however"→"hoy" in LT es),
- * which the correction filter would exclude but which still signal "wrong language."
+ * Uses isDetectionIssue (no length guard) for counting matches so that
+ * short-replacement foreign-word flags still count as detection signals.
+ * Uses isSpellingIssue (length-guarded) inside the edit-distance discriminator
+ * so the measured distance reflects a correction that would actually be applied.
  *
- * @param {string} text - Original text (used for tiebreaker)
+ * @param {string} text - Original text
  * @param {Object|null} esResult - LT response for 'es'
  * @param {Object|null} enResult - LT response for 'en-US'
  * @returns {{lang: string, result: Object}} Detected language and result to use for correction
  */
 function detectLanguage(text, esResult, enResult) {
-  function isDetectionIssue(m) {
-    return m.rule &&
-      (m.rule.issueType === 'misspelling' || m.rule.issueType === 'typographical') &&
-      m.replacements && m.replacements.length > 0;
-  }
-
   var esMatches = esResult ? (esResult.matches || []).filter(isDetectionIssue) : null;
   var enMatches = enResult ? (enResult.matches || []).filter(isDetectionIssue) : null;
 
@@ -266,12 +308,15 @@ function detectLanguage(text, esResult, enResult) {
     return {lang: 'en', result: enResult};
   }
 
-  if (esCount === 0 && enCount === 0) return {lang: 'es', result: esResult}; // R5 tiebreaker
+  // Both endpoints accept the word — default to Spanish. This sheet is
+  // Spanish-focused; words valid in both languages ("no", "si") are more
+  // likely to be Spanish vocabulary entries than English ones.
+  if (esCount === 0 && enCount === 0) return {lang: 'es', result: esResult};
 
   // Both flag the word — pick the language whose correction is closest to the original.
   var chosen = closerResult(text, esResult, enResult);
   // closerResult returns null when both results have detection matches but neither has
-  // spelling-issue matches (all suggestions shorten the span). Fall back to R5 tiebreaker.
+  // spelling-issue matches (all suggestions shorten the span). Fall back to Spanish default.
   if (!chosen) return {lang: 'es', result: esResult};
   return {lang: chosen === esResult ? 'es' : 'en', result: chosen};
 }
@@ -280,19 +325,20 @@ function detectLanguage(text, esResult, enResult) {
  * One-time backfill: writes the GOOGLETRANSLATE formula to column B for all
  * rows where column A is non-empty and column B is currently empty.
  * Run once from Extensions > Apps Script after deploying the updated GAS.
+ *
+ * Assumes row 1 is a header row and data begins at row 2. If your sheet has
+ * no header row, update the start row before running.
  */
 function setupTranslationFormulas() {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return;
 
-  var data = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+  var data = sheet.getRange(2, COL_VOCAB, lastRow - 1, COL_TRANSLATION).getValues();
   for (var i = 0; i < data.length; i++) {
     var row = i + 2;
     if (data[i][0] !== '' && data[i][1] === '') {
-      sheet.getRange(row, 2).setFormula(
-        '=IF(A' + row + '="","",IFERROR(GOOGLETRANSLATE(A' + row + ',C' + row + ',IF(C' + row + '="es","en","es")),"))'
-      );
+      sheet.getRange(row, COL_TRANSLATION).setFormula(translateFormula(row));
     }
   }
 }
