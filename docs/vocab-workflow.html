@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Catch & Release Vocabulary Workflow</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #0d1117;
+  color: #e2e8f0;
+  min-height: 100vh;
+  padding: 48px 24px 64px;
+}
+
+h1 {
+  text-align: center;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #f8fafc;
+  margin-bottom: 6px;
+}
+.subtitle {
+  text-align: center;
+  font-size: 0.9rem;
+  color: #64748b;
+  margin-bottom: 56px;
+}
+
+/* ── Flow ── */
+.flow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  max-width: 680px;
+  margin: 0 auto;
+}
+
+.step {
+  position: relative;
+  width: 100%;
+  background: #161d2e;
+  border: 1.5px solid #2d3a52;
+  border-radius: 16px;
+  padding: 24px 28px;
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+.step.you    { border-color: #3b82f6; background: #0f1d38; }
+.step.auto   { border-color: #10b981; background: #0b1f18; }
+.step.result { border-color: #f59e0b; background: #1c1709; }
+.step.payoff { border-color: #a855f7; background: #160d24; }
+
+.icon {
+  font-size: 2rem;
+  min-width: 48px;
+  text-align: center;
+  margin-top: 2px;
+}
+
+.step-body {}
+.step-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.step.you    .step-label { color: #60a5fa; }
+.step.auto   .step-label { color: #34d399; }
+.step.result .step-label { color: #fbbf24; }
+.step.payoff .step-label { color: #c084fc; }
+
+.step-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #f1f5f9;
+  margin-bottom: 8px;
+}
+.step-desc {
+  font-size: 0.88rem;
+  color: #94a3b8;
+  line-height: 1.6;
+}
+.step-desc strong { color: #cbd5e1; font-weight: 500; }
+
+/* connector */
+.connector {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 4px 0;
+  gap: 2px;
+}
+.connector-line {
+  width: 2px;
+  height: 28px;
+  background: linear-gradient(to bottom, #2d3a52, #2d3a52);
+}
+.connector-label {
+  font-size: 0.72rem;
+  color: #475569;
+  background: #0d1117;
+  padding: 2px 10px;
+  border-radius: 20px;
+  border: 1px solid #1e2a3a;
+  white-space: nowrap;
+}
+.connector-line2 {
+  width: 2px;
+  height: 28px;
+  background: #2d3a52;
+}
+
+/* pills */
+.pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+.pill-blue   { background: #0f2040; border: 1px solid #1d4ed8; color: #93c5fd; }
+.pill-green  { background: #052e16; border: 1px solid #166534; color: #86efac; }
+.pill-amber  { background: #1c1200; border: 1px solid #92400e; color: #fcd34d; }
+.pill-purple { background: #1a0533; border: 1px solid #6b21a8; color: #d8b4fe; }
+
+/* branch split for two payoffs */
+.branch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  width: 100%;
+}
+.branch .step { width: 100%; }
+
+/* outcomes section */
+.outcomes {
+  max-width: 680px;
+  margin: 48px auto 0;
+}
+.outcomes h2 {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #475569;
+  text-align: center;
+  margin-bottom: 20px;
+}
+.outcome-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+.outcome-card {
+  background: #161d2e;
+  border: 1px solid #2d3a52;
+  border-radius: 12px;
+  padding: 18px 16px;
+  text-align: center;
+}
+.outcome-card .oc-icon { font-size: 1.6rem; margin-bottom: 10px; }
+.outcome-card .oc-title { font-size: 0.85rem; font-weight: 600; color: #e2e8f0; margin-bottom: 6px; }
+.outcome-card .oc-desc  { font-size: 0.78rem; color: #64748b; line-height: 1.5; }
+</style>
+</head>
+<body>
+
+<h1>Catch & Release Vocabulary Workflow</h1>
+<p class="subtitle">From encountering a word to knowing it — automatically</p>
+
+<div class="flow">
+
+  <!-- STEP 1 -->
+  <div class="step you">
+    <div class="icon">💡</div>
+    <div class="step-body">
+      <div class="step-label">You</div>
+      <div class="step-title">Encounter a word or phrase</div>
+      <div class="step-desc">
+        You come across a word or phrase you want to capture — a Spanish word you heard or read, or an English word you needed and couldn't say in Spanish.
+        You open the Google Sheet and type it in — <strong>that's all you do.</strong>
+      </div>
+      <div class="pills">
+        <span class="pill pill-blue">📋 Google Sheet</span>
+        <span class="pill pill-blue">⌨️ Type it in</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="connector">
+    <div class="connector-line"></div>
+    <div class="connector-label">instantly, while you type</div>
+    <div class="connector-line2"></div>
+  </div>
+
+  <!-- STEP 2 -->
+  <div class="step auto">
+    <div class="icon">✨</div>
+    <div class="step-body">
+      <div class="step-label">Automatic</div>
+      <div class="step-title">Spelling and accents fixed automatically</div>
+      <div class="step-desc">
+        Don't worry about missing <strong>é, ó, ú, ñ</strong> — the sheet detects the language and corrects
+        spelling and missing accents as you go.
+        The original typo is saved as a note so you can see what changed.
+      </div>
+      <div class="pills">
+        <span class="pill pill-green">✅ caida → caída</span>
+        <span class="pill pill-green">✅ ultimamente → últimamente</span>
+        <span class="pill pill-green">✅ lucido → lúcido</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="connector">
+    <div class="connector-line"></div>
+    <div class="connector-label">when you run the enrichment script</div>
+    <div class="connector-line2"></div>
+  </div>
+
+  <!-- STEP 3 -->
+  <div class="step auto">
+    <div class="icon">🔍</div>
+    <div class="step-body">
+      <div class="step-label">Automatic</div>
+      <div class="step-title">Finds a real native video for every word or phrase</div>
+      <div class="step-desc">
+        The sheet looks up each word in your local Dreaming Spanish library and finds a
+        video where a native speaker actually uses it. A clickable link to the video is written
+        to one column, and the exact timestamp is recorded in the next column for reference.
+        Already-enriched words are skipped.
+      </div>
+      <div class="pills">
+        <span class="pill pill-green">🔗 Clickable video link</span>
+        <span class="pill pill-green">🕐 Timestamp in next column</span>
+        <span class="pill pill-green">♻️ Skips already-done rows</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="connector">
+    <div class="connector-line"></div>
+    <div class="connector-label">when you run the Anki sync</div>
+    <div class="connector-line2"></div>
+  </div>
+
+  <!-- STEP 4 -->
+  <div class="step auto">
+    <div class="icon">🃏</div>
+    <div class="step-body">
+      <div class="step-label">Automatic</div>
+      <div class="step-title">Flashcards created and synced</div>
+      <div class="step-desc">
+        Every word/phrase becomes an Anki flashcard — Spanish on one side, English on the other —
+        and syncs to <strong>all your devices</strong> via AnkiWeb.
+        Already-imported words are never duplicated.
+      </div>
+      <div class="pills">
+        <span class="pill pill-green">📱 Phone, tablet, desktop</span>
+        <span class="pill pill-green">🔁 No duplicates</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="connector">
+    <div class="connector-line"></div>
+    <div class="connector-label">when you want to review</div>
+    <div class="connector-line2"></div>
+  </div>
+
+  <!-- STEP 5 split -->
+  <div class="branch">
+    <div class="step payoff">
+      <div class="step-body">
+        <div class="step-label">You get</div>
+        <div class="step-title">📱 Study anywhere</div>
+        <div class="step-desc">
+          Open Anki on your phone and drill the words using spaced repetition.
+          Anki decides what to show you and when.
+        </div>
+      </div>
+    </div>
+    <div class="step payoff">
+      <div class="step-body">
+        <div class="step-label">You get</div>
+        <div class="step-title">🎬 Jump to context</div>
+        <div class="step-desc">
+          Click any link in the sheet to open the video where the word is used. Use the timestamp in the next column to jump to the exact moment.
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- OUTCOMES -->
+<div class="outcomes">
+  <h2>What you get out of it</h2>
+  <div class="outcome-grid">
+    <div class="outcome-card">
+      <div class="oc-icon">⚡</div>
+      <div class="oc-title">Zero friction capture</div>
+      <div class="oc-desc">Hear it, type it. No copy-pasting, no dictionary lookup, no formatting.</div>
+    </div>
+    <div class="outcome-card">
+      <div class="oc-icon">🎯</div>
+      <div class="oc-title">Real context, not textbook examples</div>
+      <div class="oc-desc">Every word links to a native speaker using it naturally — the moment you can jump back to.</div>
+    </div>
+    <div class="outcome-card">
+      <div class="oc-icon">🔤</div>
+      <div class="oc-title">Correct Spanish without effort</div>
+      <div class="oc-desc">Accents and spelling are fixed automatically. Type fast without worrying about the keyboard.</div>
+    </div>
+    <div class="outcome-card">
+      <div class="oc-icon">📱</div>
+      <div class="oc-title">Study on any device</div>
+      <div class="oc-desc">Cards sync to AnkiWeb the moment you run the script. Pick up your phone and start drilling.</div>
+    </div>
+    <div class="outcome-card">
+      <div class="oc-icon">🔁</div>
+      <div class="oc-title">Spaced repetition built in</div>
+      <div class="oc-desc">Anki shows you words right before you'd forget them — no manual scheduling needed.</div>
+    </div>
+    <div class="outcome-card">
+      <div class="oc-icon">🗂️</div>
+      <div class="oc-title">One source of truth</div>
+      <div class="oc-desc">The Google Sheet is your vocabulary log. Everything else — cards, links, timestamps — flows from it.</div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
