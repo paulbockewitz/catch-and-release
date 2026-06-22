@@ -123,6 +123,24 @@ The threshold `> 1` cleanly separates the two populations without any language-i
 
 **Subprocess reliability:** Every `subprocess.run()` call against an external CLI should include `timeout=` (30 seconds is a reasonable default) and `except subprocess.TimeoutExpired` handling. Always exit non-zero (1) when the binary is not found — exit 0 causes callers to proceed as if the tool is available. Wrap the final write in try/except and log before exiting so the run failure is diagnosable.
 
+---
+
+## Addendum: Detection Filter Divergence (2026-06-22)
+
+During implementation of the bilingual detection feature ([docs/plans/2026-06-21-001-feat-bilingual-entry-language-detection-plan.md](docs/plans/2026-06-21-001-feat-bilingual-entry-language-detection-plan.md)), a related issue emerged: the `detectLanguage()` zero-match oracle was classifying Spanish accent-error words (e.g. "caida", "ultimamente") as English.
+
+**Root cause:** the oracle shared `isSpellingIssue` (with the replacement-length guard) for both counting matches and for correction. When LT `es` flagged "caida" → "caída" (edit distance 1, same length, passes filter → `esCount = 1`) while LT `en-US` returned 0 matches for "caida" (no English rule) → `enCount = 0`, the code returned `{lang: 'en'}`. The `enCount === 0 && esCount > 0` branch was returning "English" when in fact it needed the edit-distance discriminator from the old bailout guard.
+
+**Fix:** In the `enCount === 0 && esCount > 0` case, apply the same d ≤ 1 discriminator: if `firstCorrectedText(text, esResult)` returns a candidate at edit distance ≤ 1 → classify as "es" (accent error); otherwise "en".
+
+**Second issue discovered:** the replacement-length guard in `isSpellingIssue` also excluded valid "wrong language" detection signals where LT `es` suggests a shorter replacement for a foreign word (e.g. "however" → "hoy", 3 < 7). With the guard, these matches were filtered out, leaving `esCount = 0` even when LT `es` did flag the word — which collapsed these cases into the tiebreaker ("both = 0 → es") rather than the correct oracle outcome.
+
+**Fix:** `detectLanguage` uses a separate, broader filter (`isDetectionIssue`, no length guard) for counting matches. The length guard is kept in `isSpellingIssue` for `spellingMatches` and `firstCorrectedText`, so corrections remain safe. The `firstCorrectedText` used inside the d ≤ 1 discriminator still uses the narrower `isSpellingIssue` — ensuring the distance measured reflects a correction that would actually be applied.
+
+**Revised principle:** Detection and correction intentionally use different filters. The length guard is a *correction safety rule*, not a *detection signal rule*. The original "filter parity" requirement applied to the old architecture (where the same filter governed both language selection and correction application). In the new architecture these are separate steps with separate filters.
+
+---
+
 ## Related Issues
 
 - Plan: [docs/plans/2026-06-18-001-feat-vocab-sheet-spell-check-plan.md](docs/plans/2026-06-18-001-feat-vocab-sheet-spell-check-plan.md) — U1 steps 6-7 specify the confidence guard and misspelling filter adjacent to where the regression lived. The plan predates the edit-distance discriminator; the new guard logic is not reflected there.

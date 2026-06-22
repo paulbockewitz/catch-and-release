@@ -49,11 +49,17 @@ The detection mechanism is LanguageTool's zero-TYPO-match oracle: call LT `es` a
 **Spanish diacritics fast-path fires before LT calls and calls only LT `es`.**
 A word with ñ, á, etc. is unambiguously Spanish. The fast-path skips the `en-US` call entirely and calls only LT `es` for correction. This saves one API call per diacritic-containing word, which is the common case for Spanish vocabulary.
 
-**Zero-TYPO-match oracle; edit-distance fallback when both languages flag the word.**
-es=0 and en>0 → "es". en=0 and es>0 → "en". Both=0 → "es" (R5 tiebreaker). Both>0 → `closerResult()` edit-distance winner — the same function already used in the fallback branch for misspelled words. This handles entries like "caida" (both flag it; es correction "caída" is edit distance 1; en correction is much farther) without new logic.
+**Zero-TYPO-match oracle with edit-distance discriminator for the `en=0, es>0` case.**
+es=0 and en>0 → "es". Both=0 → "es" (R5 tiebreaker). Both>0 → `closerResult()` edit-distance winner.
 
-**The match filter used in `detectLanguage` must be identical to `firstCorrectedText` and `spellingMatches`.**
-Filter: `issueType === 'misspelling' || issueType === 'typographical'`, with `m.replacements[0].value.length >= m.length`. Divergence between these three filter predicates was the root cause of a prior regression; see prior learning doc.
+The `en=0 and es>0` case requires a discriminator: LT en-US returns 0 matches for both (a) valid English words and (b) Spanish words with accent errors, because LT en-US simply has no rule for these inputs. The two cases are separated by edit distance: Spanish accent fixes are always edit distance ≤ 1 (one character changed), while LT es's "correction" of a genuine English word is much farther. If `firstCorrectedText(text, esResult)` returns a candidate at edit distance ≤ 1 → "es" (accent error); otherwise → "en".
+
+**Detection and correction use different match filters — intentionally.**
+Detection (`isDetectionIssue` in `detectLanguage`): counts any misspelling/typographical match regardless of replacement length. This ensures foreign-word flags with shorter replacements (e.g. LT es suggesting "hoy" for "however") are counted for language detection even though they'd be rejected for correction.
+
+Correction (`isSpellingIssue` in `spellingMatches` and `firstCorrectedText`): adds the replacement-length guard (`m.replacements[0].value.length >= m.length`). This prevents shortening corrections like "lucido" → "lucid". The `firstCorrectedText` function used in `closerResult()` and the `en=0,es>0` edit-distance check must also use this narrower filter so the comparison reflects corrections that would actually be applied.
+
+Note: an earlier design required identical filters across all three. This was revised during implementation after discovering that the shared length guard excluded valid "wrong language" signals in the detection step, causing Spanish accent-error words to be classified as English.
 
 **GAS writes the GOOGLETRANSLATE formula to col B when col B is empty.**
 `handleEdit` writes the formula after writing col C. Non-empty col B values (user-typed) are not overwritten. A separate `setupTranslationFormulas()` handles existing rows. GAS `setFormula()` does not require the `"` → `""` escaping that the Sheets HTTP API needs — that escaping applies only to `valueInputOption="USER_ENTERED"` in Python callers.
@@ -71,18 +77,20 @@ flowchart TD
     B -->|Yes| C[Call LT es only]
     C --> D[detectedLang = es\nresult = esResult]
     B -->|No| E[Call LT es\nAND LT en-US]
-    E --> F{Zero-match\noracle}
+    E --> F{Detection\ncounts}
     F -->|"es=0, en>0"| G[detectedLang = es\nresult = esResult]
-    F -->|"en=0, es>0"| H[detectedLang = en\nresult = enResult]
+    F -->|"en=0, es>0"| EDIST{"esFirst\nedit dist ≤ 1?"}
+    EDIST -->|yes| H_ES[detectedLang = es\naccent error]
+    EDIST -->|no| H_EN[detectedLang = en\nresult = enResult]
     F -->|"both = 0"| I[detectedLang = es\ntiebreaker]
     F -->|"both > 0"| J["closerResult()\nedit-distance winner"]
     J --> K[detectedLang = lang\nof winning result]
-    D & G & H & I & K --> L[Write detectedLang\nto col C]
-    L --> M[Apply LT correction\nto col A if any]
-    M --> N{col B empty?}
+    D & G & H_ES & H_EN & I & K --> L[Write detectedLang\nto col C]
+    L --> N{col B empty?}
     N -->|Yes| O["Write =GOOGLETRANSLATE\nformula to col B"]
-    N -->|No| P[Done]
-    O --> P
+    N -->|No| M
+    O --> M[Apply LT correction\nto col A if any]
+    M --> P[Done]
 ```
 
 **Col B formula shape (for row `n`):**
