@@ -2,6 +2,8 @@
 .env
 credentials.json
 token.json
+brainstorms/
+plans/
 
 # Temp / intermediate files
 .tmp/

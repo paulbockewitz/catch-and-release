@@ -79,7 +79,11 @@ def get_sheets_service():
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
+            try:
+                creds.refresh(Request())
+            except Exception as exc:
+                print(f"ERROR: OAuth token refresh failed: {exc}", file=sys.stderr)
+                sys.exit(1)
         else:
             print("  Opening browser for Google authorization (one-time only)...")
             flow = InstalledAppFlow.from_client_secrets_file(str(creds_path), SCOPES)
@@ -288,8 +292,7 @@ def main():
             if args.dry_run:
                 print(f"  WOULD WRITE  row {sheet_row_num}: {display}  @ {hit_ts}")
             else:
-                if not current_url:
-                    stage_write(pending, tab, sheet_row_num, url_col, cell_value)
+                stage_write(pending, tab, sheet_row_num, url_col, cell_value)
                 if hit_ts:
                     stage_write(pending, tab, sheet_row_num, ts_col, hit_ts)
                 print(f"  QUEUED row {sheet_row_num}: {display}  @ {hit_ts}")

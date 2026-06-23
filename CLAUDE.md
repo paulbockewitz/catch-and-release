@@ -73,6 +73,9 @@ Every failure is a chance to make the system stronger:
 .tmp/                   # Temporary files (scraped data, intermediate exports). Regenerated as needed.
 tools/                  # Python scripts for deterministic execution
 workflows/              # Markdown SOPs defining what to do and how
+docs/solutions/         # Documented solutions to past problems (bugs, best practices, workflow patterns),
+                        # organized by category with YAML frontmatter (module, tags, problem_type)
+CONCEPTS.md             # Shared domain vocabulary (entities, named processes, status concepts)
 .env                    # API keys and environment variables
 .env.example            # Template showing required keys (no values)
 credentials.json        # Google OAuth credentials (gitignored)
